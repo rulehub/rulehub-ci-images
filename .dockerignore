@@ -1,0 +1,10 @@
+# Reduce Docker build context; keep base/scripts included for base builds
+.git
+.gitignore
+logs/
+artifacts/
+act_report/
+.tmp/
+.DS_Store
+node_modules/
+.venv/

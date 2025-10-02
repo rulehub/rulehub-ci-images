@@ -1,0 +1,5 @@
+/logs/
+artifacts/
+act_report/
+.github/act.secrets
+.env

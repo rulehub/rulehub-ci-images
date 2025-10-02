@@ -1,0 +1,173 @@
+version: 2
+updates:
+  # Keep GitHub Actions pinned and up to date
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "04:00"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 2
+    labels:
+      - dependencies
+      - security
+    groups:
+      actions-core:
+        patterns:
+          - "actions/*"
+        update-types:
+          - patch
+          - minor
+      docker-actions:
+        patterns:
+          - "docker/*"
+        update-types:
+          - patch
+          - minor
+
+  # Dockerfiles: monitor each directory that contains a Dockerfile
+  - package-ecosystem: docker
+    directory: "/base"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "04:15"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 2
+    labels:
+      - dependencies
+      - security
+    groups:
+      base-os:
+        patterns:
+          - ubuntu
+          - alpine
+          - debian
+        update-types:
+          - patch
+          - minor
+      language-runtimes:
+        patterns:
+          - node
+          - python
+          - golang
+        update-types:
+          - patch
+          - minor
+
+  - package-ecosystem: docker
+    directory: "/charts"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "04:20"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 2
+    labels:
+      - dependencies
+      - security
+    groups:
+      base-os:
+        patterns:
+          - ubuntu
+          - alpine
+          - debian
+        update-types:
+          - patch
+          - minor
+      language-runtimes:
+        patterns:
+          - node
+          - python
+          - golang
+        update-types:
+          - patch
+          - minor
+
+  - package-ecosystem: docker
+    directory: "/docs"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "04:25"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 2
+    labels:
+      - dependencies
+      - security
+    groups:
+      base-os:
+        patterns:
+          - ubuntu
+          - alpine
+          - debian
+        update-types:
+          - patch
+          - minor
+      language-runtimes:
+        patterns:
+          - node
+          - python
+          - golang
+        update-types:
+          - patch
+          - minor
+
+  - package-ecosystem: docker
+    directory: "/frontend"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "04:30"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 2
+    labels:
+      - dependencies
+      - security
+    groups:
+      base-os:
+        patterns:
+          - ubuntu
+          - alpine
+          - debian
+        update-types:
+          - patch
+          - minor
+      language-runtimes:
+        patterns:
+          - node
+          - python
+          - golang
+        update-types:
+          - patch
+          - minor
+
+  - package-ecosystem: docker
+    directory: "/policy"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "04:35"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 2
+    labels:
+      - dependencies
+      - security
+    groups:
+      base-os:
+        patterns:
+          - ubuntu
+          - alpine
+          - debian
+        update-types:
+          - patch
+          - minor
+      language-runtimes:
+        patterns:
+          - node
+          - python
+          - golang
+        update-types:
+          - patch
+          - minor

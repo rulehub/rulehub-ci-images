@@ -1,0 +1,29 @@
+# This file is intended to be used as a build-stage Dockerfile that
+# creates a ci-base image with RuleHub repository Python deps preinstalled.
+# Build it from the rulehub-ci-images directory with a build-context that
+# includes the sibling `rulehub/` repository (example in Makefile target).
+# syntax=docker/dockerfile:1.6
+
+ARG BASE_REF=ghcr.io/<ORG>/ci-base:latest
+FROM ${BASE_REF}
+
+LABEL org.opencontainers.image.source="https://github.com/<ORG>/rulehub-ci-images"
+LABEL org.opencontainers.image.description="RuleHub CI base with RuleHub repo Python deps baked in."
+
+USER root
+
+# Copy repository-level requirements from sibling `rulehub/` directory (so build
+# MUST use a context that contains that directory, e.g. build context '../')
+COPY rulehub/requirements.lock /tmp/requirements.lock
+COPY rulehub/requirements.txt /tmp/requirements.txt
+COPY rulehub/requirements-dev.lock /tmp/requirements-dev.lock
+COPY rulehub/requirements-dev.txt /tmp/requirements-dev.txt
+
+# Install the Python dependencies globally into the image so they are available
+# to CI jobs even when the workspace is mounted into the container at runtime.
+# Installing globally avoids the problem where a .venv created inside the
+# repository workspace would be masked by a mounted volume.
+COPY rulehub-ci-images/base/scripts/install-reqs.sh /tmp/install-reqs.sh
+RUN chmod +x /tmp/install-reqs.sh && /tmp/install-reqs.sh && rm -f /tmp/install-reqs.sh
+
+USER 1001

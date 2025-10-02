@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Creates .venv, upgrades pip, installs requirements (+dev).
+# If the container/image already has the repo's Python packages installed
+# system-wide (a 'baked' image), create the venv with --system-site-packages
+# and skip re-installing requirements to make the step fast and hermetic.
+# Default interpreter can be overridden: PYTHON_BIN=python3.11 python-venv-install
+
+PYTHON_BIN="${PYTHON_BIN:-python3.11}"
+
+# Marker package to detect baked image. Change if your baked image guarantees
+# another project-specific package is present.
+MARKER_PKG="ruff"
+
+# Detect if the marker package can be imported by the selected Python
+SYSTEM_HAS_MARKER=0
+if "$PYTHON_BIN" -c "import ${MARKER_PKG}" >/dev/null 2>&1; then
+  SYSTEM_HAS_MARKER=1
+fi
+
+if [ ! -d .venv ]; then
+  if [ "$SYSTEM_HAS_MARKER" -eq 1 ]; then
+    # fast-path: venv that can see system site-packages so we don't reinstall
+    "$PYTHON_BIN" -m venv --system-site-packages .venv
+  else
+    "$PYTHON_BIN" -m venv .venv
+  fi
+fi
+
+# Activate the venv so further operations target it
+. .venv/bin/activate
+
+python -m pip install -U pip
+
+if [ "$SYSTEM_HAS_MARKER" -eq 1 ]; then
+  echo "System-wide Python packages present (marker=${MARKER_PKG}); skipping pip installs"
+  exit 0
+fi
+
+# Shim for conditional deps when lock generated on newer Python
+PY_VER=$(python - <<'EOF'
+import sys
+print(f"{sys.version_info.major}.{sys.version_info.minor}")
+EOF
+)
+case "$PY_VER" in
+  3.11|3.12)
+    python -m pip install "typing-extensions==4.15.0" || true
+    ;;
+esac
+
+if [ -f requirements.lock ]; then
+  pip install -r requirements.lock
+elif [ -f requirements.txt ]; then
+  pip install -r requirements.txt
+fi
+
+if [ -f requirements-dev.lock ]; then
+  pip install -r requirements-dev.lock
+elif [ -f requirements-dev.txt ]; then
+  pip install -r requirements-dev.txt
+fi
+
+echo "Python deps installed into .venv"

@@ -1,0 +1,72 @@
+name: "Install supplychain tools"
+description: "Download and install syft and grype (anchore) with optional SHA256 checks. Use as a composite action to avoid curl | sh and centralize versions."
+author: "Maintainers"
+inputs:
+  syft-version:
+    description: "syft release version (e.g. 0.87.0)"
+    required: true
+  grype-version:
+    description: "grype release version (e.g. 0.59.0)"
+    required: true
+  syft-sha:
+    description: "Optional sha256 of the syft tarball to verify integrity (hex)"
+    required: false
+    default: ""
+  grype-sha:
+    description: "Optional sha256 of the grype tarball to verify integrity (hex)"
+    required: false
+    default: ""
+
+runs:
+  using: "composite"
+  steps:
+    - name: Prepare env
+      shell: bash
+      run: |
+        set -euo pipefail
+        echo "SYFT_VER=${{ inputs.syft-version }}" >> $GITHUB_ENV
+        echo "GRYPE_VER=${{ inputs.grype-version }}" >> $GITHUB_ENV
+        echo "SYFT_SHA=${{ inputs.syft-sha }}" >> $GITHUB_ENV
+        echo "GRYPE_SHA=${{ inputs.grype-sha }}" >> $GITHUB_ENV
+
+    - name: Install syft & grype
+      shell: bash
+      run: |
+        set -euo pipefail
+        # Work in a temp dir
+        TMPDIR=$(mktemp -d)
+        cleanup() { rm -rf "$TMPDIR"; }
+        trap cleanup EXIT
+
+        echo "Installing syft v${SYFT_VER} and grype v${GRYPE_VER}"
+
+        SYFT_URL="https://github.com/anchore/syft/releases/download/v${SYFT_VER}/syft_${SYFT_VER}_linux_amd64.tar.gz"
+        GRYPE_URL="https://github.com/anchore/grype/releases/download/v${GRYPE_VER}/grype_${GRYPE_VER}_linux_amd64.tar.gz"
+
+        echo "Downloading syft from $SYFT_URL"
+        curl -fsSL "$SYFT_URL" -o "$TMPDIR/syft.tar.gz"
+        if [ -n "${SYFT_SHA:-}" ]; then
+          echo "${SYFT_SHA}  $TMPDIR/syft.tar.gz" | sha256sum -c -
+        fi
+        tar -xzf "$TMPDIR/syft.tar.gz" -C "$TMPDIR"
+        if [ -f "$TMPDIR/syft" ]; then
+          install -m 0755 "$TMPDIR/syft" /usr/local/bin/syft
+        elif [ -f "$TMPDIR/syft-${SYFT_VER}" ]; then
+          install -m 0755 "$TMPDIR/syft-${SYFT_VER}" /usr/local/bin/syft
+        fi
+
+        echo "Downloading grype from $GRYPE_URL"
+        curl -fsSL "$GRYPE_URL" -o "$TMPDIR/grype.tar.gz"
+        if [ -n "${GRYPE_SHA:-}" ]; then
+          echo "${GRYPE_SHA}  $TMPDIR/grype.tar.gz" | sha256sum -c -
+        fi
+        tar -xzf "$TMPDIR/grype.tar.gz" -C "$TMPDIR"
+        if [ -f "$TMPDIR/grype" ]; then
+          install -m 0755 "$TMPDIR/grype" /usr/local/bin/grype
+        elif [ -f "$TMPDIR/grype-${GRYPE_VER}" ]; then
+          install -m 0755 "$TMPDIR/grype-${GRYPE_VER}" /usr/local/bin/grype
+        fi
+
+        # Sanity versions (do not fail the workflow on minor issues)
+        echo "syft:"; syft version || true
+        echo "grype:"; grype version || true

@@ -1,0 +1,441 @@
+name: build-publish
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+    paths:
+      - base/**
+      - policy/**
+      - charts/**
+      - frontend/**
+      - .github/workflows/build-publish.yml
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+
+env:
+  REG: ghcr.io/${{ github.repository_owner }}
+  PLATFORMS: linux/amd64,linux/arm64
+  IS_ACT: "false"
+
+concurrency:
+  group: ci-images-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-base:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - name: Detect act
+        run: |
+          if [ "${ACT:-}" = "true" ] || [ "${IS_ACT:-}" = "true" ]; then
+            echo "IS_ACT=true" >> "$GITHUB_ENV"
+          fi
+      - name: Adjust platforms for act
+        if: env.IS_ACT == 'true'
+        run: |
+          # When running under act (local), restrict to a single platform so
+          # docker buildx --load doesn't attempt to export a multi-arch manifest
+          # which the local docker exporter can't handle. Preserve multi-arch in CI.
+          echo "PLATFORMS=linux/amd64" >> "$GITHUB_ENV"
+      - name: Compute tags
+        id: meta
+        env:
+          IMAGE: ci-base
+        run: |
+          set -euo pipefail
+          TAGS="${REG}/${IMAGE}:latest"
+          if [[ "${GITHUB_REF_TYPE:-}" == "tag" ]] && [[ "${GITHUB_REF_NAME:-}" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+            MAJOR="${BASH_REMATCH[1]}"; MINOR="${BASH_REMATCH[2]}"; PATCH="${BASH_REMATCH[3]}"
+            TAGS+=$'\n'"${REG}/${IMAGE}:v${MAJOR}.${MINOR}.${PATCH}"
+            TAGS+=$'\n'"${REG}/${IMAGE}:v${MAJOR}.${MINOR}"
+            TAGS+=$'\n'"${REG}/${IMAGE}:v${MAJOR}"
+          fi
+          {
+            echo "tags<<EOF"
+            echo "$TAGS"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+      - name: Login GHCR
+        if: ${{ env.IS_ACT != 'true' }}
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build & load base (act/local)
+        if: env.IS_ACT == 'true'
+        id: base-act
+        run: |
+          set -euo pipefail
+          # Use buildx directly with --load for local runs to avoid manifest-list exports
+          TAGS="${{ steps.meta.outputs.tags }}"
+          # Build and load the first tag; tags may contain newlines, so pick the first
+          FIRST_TAG=$(echo "$TAGS" | head -n1)
+          mkdir -p ./artifacts
+          # capture plain progress to a file so act diagnostics include build logs
+          # When running under act, prefer the locally-built base image to avoid
+          # pulling from GHCR which may reject anonymous requests. Pass BASE_REF
+          # build-arg so downstream Dockerfiles referencing ARG BASE_REF will use
+          # the local ci-base:localtest image.
+          docker buildx build --load --platform linux/amd64 -t "$FIRST_TAG" -t ci-base:localtest \
+            --build-arg BASE_REF=ci-base:localtest ./base --progress=plain 2>&1 | tee ./artifacts/build-base-output.log
+      - name: Build & push base (CI)
+        if: env.IS_ACT != 'true'
+        id: base
+        uses: docker/build-push-action@v6
+        with:
+          context: ./base
+          push: ${{ env.IS_ACT != 'true' }}
+          load: ${{ env.IS_ACT == 'true' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          platforms: ${{ env.PLATFORMS }}
+          provenance: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+      - name: Install syft & grype (pinned)
+        if: ${{ env.IS_ACT != 'true' }}
+        uses: ./.github/actions/install-supplychain-tools
+        with:
+          syft-version: "0.96.0"
+          grype-version: "0.69.1"
+          syft-sha: "abc1b66ba07241eaa667a78900dabab4a4e7a96a1776b39628a4de3b61dfa30d"
+          grype-sha: "53ad7a96d0561fdacc82519972025ba0f1a74e16edfdf628d4ce16cc3c714817"
+      - name: Sanity check (base image)
+        if: ${{ env.IS_ACT != 'true' }}
+        run: |
+          docker run --rm ${{ env.REG }}/ci-base:latest yq --version
+          docker run --rm ${{ env.REG }}/ci-base:latest python3.11 --version
+          docker run --rm ${{ env.REG }}/ci-base:latest node --version
+          docker run --rm ${{ env.REG }}/ci-base:latest syft version
+          docker run --rm ${{ env.REG }}/ci-base:latest cosign version
+      - name: Generate SBOM (base)
+        if: ${{ env.IS_ACT != 'true' }}
+        run: syft ${{ env.REG }}/ci-base:latest -o spdx-json > sbom-ci-base.spdx.json
+      - name: Vulnerability scan (base)
+        if: ${{ env.IS_ACT != 'true' }}
+        run: grype ${{ env.REG }}/ci-base:latest --fail-on critical --only-fixed --add-cpes-if-none
+      - name: Upload SBOM artifact (base)
+        if: ${{ always() && env.IS_ACT != 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-ci-base
+          path: sbom-ci-base.spdx.json
+      - name: Summarize digest (base)
+        if: env.IS_ACT != 'true'
+        run: echo "ci-base@${{ steps.base.outputs.digest }}" >> "$GITHUB_STEP_SUMMARY"
+
+  build-policy:
+    needs: build-base
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - name: Detect act
+        run: |
+          if [ "${ACT:-}" = "true" ] || [ "${IS_ACT:-}" = "true" ]; then
+            echo "IS_ACT=true" >> "$GITHUB_ENV"
+          fi
+      - name: Adjust platforms for act
+        if: env.IS_ACT == 'true'
+        run: |
+          # Limit to single-platform under act to avoid buildx manifest list errors
+          echo "PLATFORMS=linux/amd64" >> "$GITHUB_ENV"
+      - name: Compute tags
+        id: meta
+        env:
+          IMAGE: ci-policy
+        run: |
+          set -euo pipefail
+          TAGS="${REG}/${IMAGE}:latest"
+          if [[ "${GITHUB_REF_TYPE:-}" == "tag" ]] && [[ "${GITHUB_REF_NAME:-}" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+            MAJOR="${BASH_REMATCH[1]}"; MINOR="${BASH_REMATCH[2]}"; PATCH="${BASH_REMATCH[3]}"
+            TAGS+=$'\n'"${REG}/${IMAGE}:v${MAJOR}.${MINOR}.${PATCH}"
+            TAGS+=$'\n'"${REG}/${IMAGE}:v${MAJOR}.${MINOR}"
+            TAGS+=$'\n'"${REG}/${IMAGE}:v${MAJOR}"
+          fi
+          {
+            echo "tags<<EOF"
+            echo "$TAGS"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+      - name: Patch Dockerfile placeholders (policy)
+        run: |
+          sed -i 's|ghcr.io/<ORG>|ghcr.io/${{ github.repository_owner }}|g' policy/Dockerfile || true
+          sed -i 's|ghcr.io/nektos/ci-base|ghcr.io/${{ github.repository_owner }}/ci-base|g' policy/Dockerfile || true
+      - name: Login GHCR
+        if: ${{ env.IS_ACT != 'true' }}
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build & load policy (act/local)
+        if: env.IS_ACT == 'true'
+        id: policy-act
+        run: |
+          set -euo pipefail
+          TAGS="${{ steps.meta.outputs.tags }}"
+          FIRST_TAG=$(echo "$TAGS" | head -n1)
+          mkdir -p ./artifacts
+          # Use local base image under act to avoid GHCR pulls
+          docker buildx build --load --platform linux/amd64 -t "$FIRST_TAG" \
+            --build-arg BASE_REF=ci-base:localtest ./policy --progress=plain 2>&1 | tee ./artifacts/build-policy-output.log
+      - name: Build & push policy (CI)
+        if: env.IS_ACT != 'true'
+        id: policy
+        uses: docker/build-push-action@v6
+        with:
+          context: ./policy
+          push: ${{ env.IS_ACT != 'true' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          platforms: ${{ env.PLATFORMS }}
+          provenance: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+      - name: Install syft & grype (pinned)
+        if: ${{ env.IS_ACT != 'true' }}
+        uses: ./.github/actions/install-supplychain-tools
+        with:
+          syft-version: "0.96.0"
+          grype-version: "0.69.1"
+          syft-sha: "abc1b66ba07241eaa667a78900dabab4a4e7a96a1776b39628a4de3b61dfa30d"
+          grype-sha: "53ad7a96d0561fdacc82519972025ba0f1a74e16edfdf628d4ce16cc3c714817"
+      - name: Sanity check (policy image)
+        if: ${{ env.IS_ACT != 'true' }}
+        run: |
+          docker run --rm ${{ env.REG }}/ci-policy:latest opa version
+          docker run --rm ${{ env.REG }}/ci-policy:latest kyverno version
+      - name: Generate SBOM (policy)
+        if: ${{ env.IS_ACT != 'true' }}
+        run: syft ${{ env.REG }}/ci-policy:latest -o spdx-json > sbom-ci-policy.spdx.json
+      - name: Vulnerability scan (policy)
+        if: ${{ env.IS_ACT != 'true' }}
+        run: grype ${{ env.REG }}/ci-policy:latest --fail-on critical --only-fixed --add-cpes-if-none
+      - name: Upload SBOM artifact (policy)
+        if: ${{ always() && env.IS_ACT != 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-ci-policy
+          path: sbom-ci-policy.spdx.json
+      - name: Summarize digest (policy)
+        if: env.IS_ACT != 'true'
+        run: echo "ci-policy@${{ steps.policy.outputs.digest }}" >> "$GITHUB_STEP_SUMMARY"
+
+  build-charts:
+    needs: build-base
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - name: Detect act
+        run: |
+          if [ "${ACT:-}" = "true" ] || [ "${IS_ACT:-}" = "true" ]; then
+            echo "IS_ACT=true" >> "$GITHUB_ENV"
+          fi
+      - name: Adjust platforms for act
+        if: env.IS_ACT == 'true'
+        run: |
+          echo "PLATFORMS=linux/amd64" >> "$GITHUB_ENV"
+      - name: Compute tags
+        id: meta
+        env:
+          IMAGE: ci-charts
+        run: |
+          set -euo pipefail
+          TAGS="${REG}/${IMAGE}:latest"
+          if [[ "${GITHUB_REF_TYPE:-}" == "tag" ]] && [[ "${GITHUB_REF_NAME:-}" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+            MAJOR="${BASH_REMATCH[1]}"; MINOR="${BASH_REMATCH[2]}"; PATCH="${BASH_REMATCH[3]}"
+            TAGS+=$'\n'"${REG}/${IMAGE}:v${MAJOR}.${MINOR}.${PATCH}"
+            TAGS+=$'\n'"${REG}/${IMAGE}:v${MAJOR}.${MINOR}"
+            TAGS+=$'\n'"${REG}/${IMAGE}:v${MAJOR}"
+          fi
+          {
+            echo "tags<<EOF"
+            echo "$TAGS"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+      - name: Patch Dockerfile placeholders (charts)
+        run: |
+          sed -i 's|ghcr.io/<ORG>|ghcr.io/${{ github.repository_owner }}|g' charts/Dockerfile || true
+          sed -i 's|ghcr.io/nektos/ci-base|ghcr.io/${{ github.repository_owner }}/ci-base|g' charts/Dockerfile || true
+      - name: Login GHCR
+        if: ${{ env.IS_ACT != 'true' }}
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build & load charts (act/local)
+        if: env.IS_ACT == 'true'
+        id: charts-act
+        run: |
+          set -euo pipefail
+          TAGS="${{ steps.meta.outputs.tags }}"
+          FIRST_TAG=$(echo "$TAGS" | head -n1)
+          mkdir -p ./artifacts
+          # Use local base image under act to avoid GHCR pulls
+          docker buildx build --load --platform linux/amd64 -t "$FIRST_TAG" \
+            --build-arg BASE_REF=ci-base:localtest ./charts --progress=plain 2>&1 | tee ./artifacts/build-charts-output.log
+      - name: Build & push charts (CI)
+        if: env.IS_ACT != 'true'
+        id: charts
+        uses: docker/build-push-action@v6
+        with:
+          context: ./charts
+          push: ${{ env.IS_ACT != 'true' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          platforms: ${{ env.PLATFORMS }}
+          provenance: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+      - name: Install syft & grype (pinned)
+        if: ${{ env.IS_ACT != 'true' }}
+        uses: ./.github/actions/install-supplychain-tools
+        with:
+          syft-version: "0.96.0"
+          grype-version: "0.69.1"
+          syft-sha: "abc1b66ba07241eaa667a78900dabab4a4e7a96a1776b39628a4de3b61dfa30d"
+          grype-sha: "53ad7a96d0561fdacc82519972025ba0f1a74e16edfdf628d4ce16cc3c714817"
+      - name: Sanity check (charts image)
+        if: ${{ env.IS_ACT != 'true' }}
+        run: |
+          docker run --rm ${{ env.REG }}/ci-charts:latest helm version --short
+          docker run --rm ${{ env.REG }}/ci-charts:latest kubeconform -v
+          docker run --rm ${{ env.REG }}/ci-charts:latest sh -lc 'HELM_PLUGINS=/usr/local/helm-plugins helm unittest --help >/dev/null 2>&1 && echo ok || (echo fail; exit 1)'
+      - name: Generate SBOM (charts)
+        if: ${{ env.IS_ACT != 'true' }}
+        run: syft ${{ env.REG }}/ci-charts:latest -o spdx-json > sbom-ci-charts.spdx.json
+      - name: Vulnerability scan (charts)
+        if: ${{ env.IS_ACT != 'true' }}
+        run: grype ${{ env.REG }}/ci-charts:latest --fail-on critical --only-fixed --add-cpes-if-none
+      - name: Upload SBOM artifact (charts)
+        if: ${{ always() && env.IS_ACT != 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-ci-charts
+          path: sbom-ci-charts.spdx.json
+      - name: Summarize digest (charts)
+        if: env.IS_ACT != 'true'
+        run: echo "ci-charts@${{ steps.charts.outputs.digest }}" >> "$GITHUB_STEP_SUMMARY"
+
+  build-frontend:
+    needs: build-base
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - name: Detect act
+        run: |
+          if [ "${ACT:-}" = "true" ] || [ "${IS_ACT:-}" = "true" ]; then
+            echo "IS_ACT=true" >> "$GITHUB_ENV"
+          fi
+      - name: Adjust platforms for act
+        if: env.IS_ACT == 'true'
+        run: |
+          echo "PLATFORMS=linux/amd64" >> "$GITHUB_ENV"
+      - name: Compute tags
+        id: meta
+        env:
+          IMAGE: ci-frontend
+        run: |
+          set -euo pipefail
+          TAGS="${REG}/${IMAGE}:latest"
+          if [[ "${GITHUB_REF_TYPE:-}" == "tag" ]] && [[ "${GITHUB_REF_NAME:-}" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+            MAJOR="${BASH_REMATCH[1]}"; MINOR="${BASH_REMATCH[2]}"; PATCH="${BASH_REMATCH[3]}"
+            TAGS+=$'\n'"${REG}/${IMAGE}:v${MAJOR}.${MINOR}.${PATCH}"
+            TAGS+=$'\n'"${REG}/${IMAGE}:v${MAJOR}.${MINOR}"
+            TAGS+=$'\n'"${REG}/${IMAGE}:v${MAJOR}"
+          fi
+          {
+            echo "tags<<EOF"
+            echo "$TAGS"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+      - name: Patch Dockerfile placeholders (frontend)
+        run: |
+          sed -i 's|ghcr.io/<ORG>|ghcr.io/${{ github.repository_owner }}|g' frontend/Dockerfile || true
+          sed -i 's|ghcr.io/nektos/ci-base|ghcr.io/${{ github.repository_owner }}/ci-base|g' frontend/Dockerfile || true
+      - name: Login GHCR
+        if: ${{ env.IS_ACT != 'true' }}
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build & load frontend (act/local)
+        if: env.IS_ACT == 'true'
+        id: frontend-act
+        run: |
+          set -euo pipefail
+          TAGS="${{ steps.meta.outputs.tags }}"
+          FIRST_TAG=$(echo "$TAGS" | head -n1)
+          mkdir -p ./artifacts
+          # Use local base image under act to avoid GHCR pulls
+          docker buildx build --load --platform linux/amd64 -t "$FIRST_TAG" \
+            --build-arg BASE_REF=ci-base:localtest ./frontend --progress=plain 2>&1 | tee ./artifacts/build-frontend-output.log
+      - name: Build & push frontend (CI)
+        if: env.IS_ACT != 'true'
+        id: frontend
+        uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          push: ${{ env.IS_ACT != 'true' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          platforms: ${{ env.PLATFORMS }}
+          provenance: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+      - name: Install syft & grype (pinned)
+        if: ${{ env.IS_ACT != 'true' }}
+        uses: ./.github/actions/install-supplychain-tools
+        with:
+          syft-version: "0.96.0"
+          grype-version: "0.69.1"
+          syft-sha: "abc1b66ba07241eaa667a78900dabab4a4e7a96a1776b39628a4de3b61dfa30d"
+          grype-sha: "53ad7a96d0561fdacc82519972025ba0f1a74e16edfdf628d4ce16cc3c714817"
+      - name: Sanity check (frontend image)
+        if: ${{ env.IS_ACT != 'true' }}
+        run: |
+          docker run --rm ${{ env.REG }}/ci-frontend:latest node --version
+          docker run --rm ${{ env.REG }}/ci-frontend:latest npm --version
+          docker run --rm ${{ env.REG }}/ci-frontend:latest corepack --version || true
+      - name: Generate SBOM (frontend)
+        if: ${{ env.IS_ACT != 'true' }}
+        run: syft ${{ env.REG }}/ci-frontend:latest -o spdx-json > sbom-ci-frontend.spdx.json
+      - name: Vulnerability scan (frontend)
+        if: ${{ env.IS_ACT != 'true' }}
+        run: grype ${{ env.REG }}/ci-frontend:latest --fail-on critical --only-fixed --add-cpes-if-none
+      - name: Upload SBOM artifact (frontend)
+        if: ${{ always() && env.IS_ACT != 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-ci-frontend
+          path: sbom-ci-frontend.spdx.json
+      - name: Summarize digest (frontend)
+        if: env.IS_ACT != 'true'
+        run: echo "ci-frontend@${{ steps.frontend.outputs.digest }}" >> "$GITHUB_STEP_SUMMARY"
