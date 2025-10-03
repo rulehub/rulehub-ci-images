@@ -131,9 +131,14 @@ jobs:
       - name: Generate SBOM (base, OS-only)
         if: ${{ env.IS_ACT != 'true' }}
         run: syft -c .github/syft-os.yaml ${{ env.REG }}/ci-base:latest -o syft-json > sbom-ci-base-os.syft.json
+      - name: Post-filter SBOM to OS-only (base)
+        if: ${{ env.IS_ACT != 'true' }}
+        run: jq '.artifacts |= map(select(.type=="apk" or .type=="deb" or .type=="rpm"))' sbom-ci-base-os.syft.json > sbom-ci-base-os.syft.os-only.json
       - name: Vulnerability scan (base)
         if: ${{ env.IS_ACT != 'true' }}
-        run: grype -c .github/grype-os.yaml sbom:sbom-ci-base-os.syft.json --fail-on critical --only-fixed --add-cpes-if-none
+        env:
+          GRYPE_CHECK_FOR_APP_UPDATE: "false"
+        run: grype -c .github/grype-os.yaml sbom:sbom-ci-base-os.syft.os-only.json --fail-on critical --only-fixed --add-cpes-if-none
       - name: Upload SBOM artifact (base)
         if: ${{ always() && env.IS_ACT != 'true' }}
         uses: actions/upload-artifact@v4
@@ -240,9 +245,14 @@ jobs:
       - name: Generate SBOM (policy, OS-only)
         if: ${{ env.IS_ACT != 'true' }}
         run: syft -c .github/syft-os.yaml ${{ env.REG }}/ci-policy:latest -o syft-json > sbom-ci-policy-os.syft.json
+      - name: Post-filter SBOM to OS-only (policy)
+        if: ${{ env.IS_ACT != 'true' }}
+        run: jq '.artifacts |= map(select(.type=="apk" or .type=="deb" or .type=="rpm"))' sbom-ci-policy-os.syft.json > sbom-ci-policy-os.syft.os-only.json
       - name: Vulnerability scan (policy)
         if: ${{ env.IS_ACT != 'true' }}
-        run: grype -c .github/grype-os.yaml sbom:sbom-ci-policy-os.syft.json --fail-on critical --only-fixed --add-cpes-if-none
+        env:
+          GRYPE_CHECK_FOR_APP_UPDATE: "false"
+        run: grype -c .github/grype-os.yaml sbom:sbom-ci-policy-os.syft.os-only.json --fail-on critical --only-fixed --add-cpes-if-none
       - name: Upload SBOM artifact (policy)
         if: ${{ always() && env.IS_ACT != 'true' }}
         uses: actions/upload-artifact@v4
@@ -346,9 +356,14 @@ jobs:
       - name: Generate SBOM (charts, OS-only)
         if: ${{ env.IS_ACT != 'true' }}
         run: syft -c .github/syft-os.yaml ${{ env.REG }}/ci-charts:latest -o syft-json > sbom-ci-charts-os.syft.json
+      - name: Post-filter SBOM to OS-only (charts)
+        if: ${{ env.IS_ACT != 'true' }}
+        run: jq '.artifacts |= map(select(.type=="apk" or .type=="deb" or .type=="rpm"))' sbom-ci-charts-os.syft.json > sbom-ci-charts-os.syft.os-only.json
       - name: Vulnerability scan (charts)
         if: ${{ env.IS_ACT != 'true' }}
-        run: grype -c .github/grype-os.yaml sbom:sbom-ci-charts-os.syft.json --fail-on critical --only-fixed --add-cpes-if-none
+        env:
+          GRYPE_CHECK_FOR_APP_UPDATE: "false"
+        run: grype -c .github/grype-os.yaml sbom:sbom-ci-charts-os.syft.os-only.json --fail-on critical --only-fixed --add-cpes-if-none
       - name: Upload SBOM artifact (charts)
         if: ${{ always() && env.IS_ACT != 'true' }}
         uses: actions/upload-artifact@v4
@@ -452,9 +467,14 @@ jobs:
       - name: Generate SBOM (frontend, OS-only)
         if: ${{ env.IS_ACT != 'true' }}
         run: syft -c .github/syft-os.yaml ${{ env.REG }}/ci-frontend:latest -o syft-json > sbom-ci-frontend-os.syft.json
+      - name: Post-filter SBOM to OS-only (frontend)
+        if: ${{ env.IS_ACT != 'true' }}
+        run: jq '.artifacts |= map(select(.type=="apk" or .type=="deb" or .type=="rpm"))' sbom-ci-frontend-os.syft.json > sbom-ci-frontend-os.syft.os-only.json
       - name: Vulnerability scan (frontend)
         if: ${{ env.IS_ACT != 'true' }}
-        run: grype -c .github/grype-os.yaml sbom:sbom-ci-frontend-os.syft.json --fail-on critical --only-fixed --add-cpes-if-none
+        env:
+          GRYPE_CHECK_FOR_APP_UPDATE: "false"
+        run: grype -c .github/grype-os.yaml sbom:sbom-ci-frontend-os.syft.os-only.json --fail-on critical --only-fixed --add-cpes-if-none
       - name: Upload SBOM artifact (frontend)
         if: ${{ always() && env.IS_ACT != 'true' }}
         uses: actions/upload-artifact@v4

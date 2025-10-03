@@ -1,0 +1,86 @@
+name: full-scan-report
+
+on:
+    workflow_dispatch:
+        inputs:
+            tags:
+                description: "Image tags to scan (comma-separated, default: latest)"
+                required: false
+                default: "latest"
+
+permissions:
+    contents: read
+    packages: read
+
+env:
+    REG: ghcr.io/rulehub
+
+jobs:
+    scan:
+        name: Full ecosystem scan (visibility only)
+        runs-on: ubuntu-latest
+        strategy:
+            fail-fast: false
+            matrix:
+                image: ["ci-base", "ci-policy", "ci-charts", "ci-frontend"]
+                include:
+                    - image: "ci-base"
+                      label: base
+                    - image: "ci-policy"
+                      label: policy
+                    - image: "ci-charts"
+                      label: charts
+                    - image: "ci-frontend"
+                      label: frontend
+        steps:
+            - uses: actions/checkout@ff7abcd0c3c05ccf6adc123a8cd1fd4fb30fb493
+
+            - name: Parse tags input
+              id: tags
+              run: |
+                  T="${{ github.event.inputs.tags || 'latest' }}"
+                  echo "tags=$T" >> "$GITHUB_OUTPUT"
+
+            - name: Login to GHCR
+              run: echo "${{ github.token }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+            - name: Install syft & grype (pinned)
+              uses: ./.github/actions/install-supplychain-tools
+              with:
+                  syft-version: "0.96.0"
+                  grype-version: "0.69.1"
+                  syft-sha: "abc1b66ba07241eaa667a78900dabab4a4e7a96a1776b39628a4de3b61dfa30d"
+                  grype-sha: "53ad7a96d0561fdacc82519972025ba0f1a74e16edfdf628d4ce16cc3c714817"
+
+            - name: Pull image (${{ matrix.label }})
+              run: |
+                  IFS=',' read -r -a TAGS <<< "${{ steps.tags.outputs.tags }}"
+                  for tag in "${TAGS[@]}"; do
+                    docker pull "$REG/${{ matrix.image }}:$tag"
+                  done
+
+            - name: Generate SBOM (full, ${{ matrix.label }})
+              run: |
+                  IFS=',' read -r -a TAGS <<< "${{ steps.tags.outputs.tags }}"
+                  for tag in "${TAGS[@]}"; do
+                    syft "$REG/${{ matrix.image }}:$tag" -o syft-json > "sbom-full-${{ matrix.image }}-$tag.syft.json"
+                  done
+
+            - name: Vulnerability scan (full, non-blocking, ${{ matrix.label }})
+              env:
+                  GRYPE_CHECK_FOR_APP_UPDATE: "false"
+              continue-on-error: true
+              run: |
+                  IFS=',' read -r -a TAGS <<< "${{ steps.tags.outputs.tags }}"
+                  for tag in "${TAGS[@]}"; do
+                    grype "sbom:sbom-full-${{ matrix.image }}-$tag.syft.json" -o json > "grype-${{ matrix.image }}-$tag.json" || true
+                  done
+
+            - name: Upload artifacts (${{ matrix.label }})
+              if: always()
+              uses: actions/upload-artifact@v4
+              with:
+                  name: full-scan-${{ matrix.label }}
+                  path: |
+                      sbom-full-${{ matrix.image }}-*.syft.json
+                      grype-${{ matrix.image }}-*.json
