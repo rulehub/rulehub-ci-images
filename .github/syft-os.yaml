@@ -1,8 +1,11 @@
-package:
-  catalogers:
-    enabled:
-      - apkdb
-      - dpkgdb
-      - rpmdb
-source:
-  scope: Squashed
+## Syft OS-only config: include only OS package managers and scan squashed image
+# Use override-default-catalogers to explicitly constrain catalogers to OS only
+
+# Explicitly set the catalogers list to OS package managers only
+default-catalogers:
+  - apk
+  - dpkg
+  - rpm
+
+# Ensure we scan the final filesystem (not all layers)
+scope: squashed

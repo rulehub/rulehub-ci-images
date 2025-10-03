@@ -49,6 +49,7 @@ help:
 	@echo "  IMAGES_REPO   (default: $(IMAGES_REPO))"
 	@echo
 	@echo "Targets: build, base, policy, charts, frontend, push, images, docker-versions, print-config, clean"
+	@echo "Additional: vuln-scan-os[-base|-policy|-charts|-frontend|-all] (OS-only local vuln scan)"
 
 print-config:
 	@echo ORG=$(ORG)
@@ -148,3 +149,77 @@ push-base-rulehub:
 clean:
 	@rm -rf "$(LOG_DIR)"
 	@echo "Cleaned logs/"
+
+# -------- Local OS-only vulnerability scan (mirrors CI) --------
+.PHONY: _ensure-tools vuln-scan-os vuln-scan-os-base vuln-scan-os-policy vuln-scan-os-charts vuln-scan-os-frontend vuln-scan-os-all
+
+SBOM_DIR := $(LOG_DIR)
+SYFT ?= syft
+GRYPE ?= grype
+SYFT_VERSION ?= v0.96.0
+GRYPE_VERSION ?= v0.69.1
+DOCKER ?= docker
+FAIL_ON ?= critical
+ONLY_FIXED ?= 1
+ADD_CPES_IF_NONE ?= 1
+
+# Auto-fallback to containerized tools if CLIs are missing
+# Note: $(CURDIR) is an absolute path to this repo; we mount it into the containers.
+ifeq (,$(shell command -v $(firstword $(SYFT)) >/dev/null 2>&1 && echo found))
+SYFT := $(DOCKER) run --rm -v "$(CURDIR)":"$(CURDIR)" -w "$(CURDIR)" -v /var/run/docker.sock:/var/run/docker.sock anchore/syft:$(SYFT_VERSION)
+endif
+ifeq (,$(shell command -v $(firstword $(GRYPE)) >/dev/null 2>&1 && echo found))
+GRYPE := $(DOCKER) run --rm -e GRYPE_CHECK_FOR_APP_UPDATE=false -v "$(CURDIR)":"$(CURDIR)" -w "$(CURDIR)" anchore/grype:$(GRYPE_VERSION)
+endif
+
+_ensure-tools:
+	@if ! command -v $(firstword $(SYFT)) >/dev/null 2>&1; then \
+		if ! command -v $(DOCKER) >/dev/null 2>&1; then \
+			echo "syft not found and docker unavailable. Install syft: brew install syft or install Docker Desktop." >&2; \
+			exit 127; \
+		fi; \
+	fi
+	@if ! command -v $(firstword $(GRYPE)) >/dev/null 2>&1; then \
+		if ! command -v $(DOCKER) >/dev/null 2>&1; then \
+			echo "grype not found and docker unavailable. Install grype: brew install grype or install Docker Desktop." >&2; \
+			exit 127; \
+		fi; \
+	fi
+
+# Generic target: provide IMG= reference (defaults to base latest)
+IMG ?= $(TAG_BASE)
+vuln-scan-os: _ensure-tools
+	@mkdir -p "$(SBOM_DIR)"
+	@echo "[vuln-scan-os] Image: $(IMG)" | tee "$(SBOM_DIR)/scan-$(shell echo $(IMG) | tr '/:@' '___').log"
+	# Require image to be present locally to avoid implicit network pulls
+	@docker image inspect "$(IMG)" >/dev/null 2>&1 || { \
+	  echo "[vuln-scan-os] ERROR: image not found locally: $(IMG). Build first (make base|policy|charts|frontend) or adjust IMG=<image>." >&2; \
+	  exit 1; \
+	}
+	# Generate SBOM with Syft using OS-only config; avoid unsupported CLI flags on v0.96.0
+	$(SYFT) -c .github/syft-os.yaml docker:$(IMG) -o syft-json > "$(SBOM_DIR)/sbom-os.$(shell echo $(IMG) | tr '/:@' '___').syft.json"
+	# Post-filter SBOM to OS-only artifacts to guard against tool/config drift
+	@SBOM_RAW="$(SBOM_DIR)/sbom-os.$(shell echo $(IMG) | tr '/:@' '___').syft.json"; SBOM_OS_ONLY="$(SBOM_DIR)/sbom-os.$(shell echo $(IMG) | tr '/:@' '___').syft.os-only.json"; \
+	if command -v jq >/dev/null 2>&1; then \
+	  jq '.artifacts |= map(select(.type=="apk" or .type=="deb" or .type=="rpm"))' "$$SBOM_RAW" > "$$SBOM_OS_ONLY"; \
+	  SBOM_PATH="$$SBOM_OS_ONLY"; \
+	else \
+	  echo "[vuln-scan-os] WARNING: jq not found; using unfiltered SBOM (may include ecosystem packages)" >&2; \
+	  SBOM_PATH="$$SBOM_RAW"; \
+	fi; \
+	GRYPE_CHECK_FOR_APP_UPDATE=false $(GRYPE) -c .github/grype-os.yaml sbom:"$$SBOM_PATH" --fail-on $(FAIL_ON) $(if $(ONLY_FIXED),--only-fixed,) $(if $(ADD_CPES_IF_NONE),--add-cpes-if-none,)
+
+vuln-scan-os-base: IMG := $(TAG_BASE)
+vuln-scan-os-base: vuln-scan-os
+
+vuln-scan-os-policy: IMG := $(TAG_POLICY)
+vuln-scan-os-policy: vuln-scan-os
+
+vuln-scan-os-charts: IMG := $(TAG_CHARTS)
+vuln-scan-os-charts: vuln-scan-os
+
+vuln-scan-os-frontend: IMG := $(TAG_FRONTEND)
+vuln-scan-os-frontend: vuln-scan-os
+
+# Convenience target: scan all images (stops on first failure)
+vuln-scan-os-all: vuln-scan-os-base vuln-scan-os-policy vuln-scan-os-charts vuln-scan-os-frontend

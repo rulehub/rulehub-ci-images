@@ -24,6 +24,31 @@ Centralized CI container images used across RuleHub repositories. Provides a sha
 - Build provenance is emitted (BuildKit provenance) for pushed images.
 - Image signing with cosign (keyless, OIDC) is planned; verify provenance/SBOMs in downstream pipelines.
 
+### Local vulnerability scan (OS-only)
+
+You can replicate the CI vulnerability gate locally focusing on OS packages only (same config used in CI).
+
+Prereqs (macOS):
+
+- brew install syft grype
+
+Run scans after building images locally (scan requires images to exist locally; no implicit pulls):
+
+- make vuln-scan-os-base # scans ghcr.io/rulehub/ci-base:${BASE_REF}
+- make vuln-scan-os-policy # scans ghcr.io/rulehub/ci-policy:${POLICY_REF}
+- make vuln-scan-os-charts # scans ghcr.io/rulehub/ci-charts:${CHARTS_REF}
+- make vuln-scan-os-frontend # scans ghcr.io/rulehub/ci-frontend:${FRONTEND_REF}
+
+Or scan an arbitrary local/remote image:
+
+- make vuln-scan-os IMG=ci-base:localtest
+
+Details:
+
+- Uses `.github/syft-os.yaml` to generate an OS-only SBOM and `.github/grype-os.yaml` to restrict matchers to OS packages.
+- SBOMs are written per image under `logs/` as `sbom-os.<image_triple>.syft.json` and `sbom-os.<image_triple>.syft.os-only.json`.
+- Fails the target on CRITICAL vulns (only-fixed) and adds CPEs if missing to improve matching.
+
 ## Usage
 
 Reference overlays by digest in workflows:
