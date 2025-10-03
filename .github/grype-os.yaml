@@ -1,0 +1,28 @@
+matchers:
+  java:
+    enabled: false
+  javascript:
+    enabled: false
+  python:
+    enabled: false
+  golang:
+    enabled: false
+  dotnet:
+    enabled: false
+  ruby:
+    enabled: false
+  php:
+    enabled: false
+  dart:
+    enabled: false
+  haskell:
+    enabled: false
+  erlang:
+    enabled: false
+  # OS package managers remain enabled by default; keeping explicit note:
+  rpm:
+    enabled: true
+  dpkg:
+    enabled: true
+  apk:
+    enabled: true
