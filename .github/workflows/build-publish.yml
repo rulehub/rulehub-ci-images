@@ -12,6 +12,9 @@ on:
       - policy/**
       - charts/**
       - frontend/**
+      - Makefile
+      - .github/syft-os.yaml
+      - .github/grype-os.yaml
       - .github/workflows/build-publish.yml
 
 permissions:
