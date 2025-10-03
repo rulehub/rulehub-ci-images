@@ -5,9 +5,9 @@ set -euo pipefail
 # If the container/image already has the repo's Python packages installed
 # system-wide (a 'baked' image), create the venv with --system-site-packages
 # and skip re-installing requirements to make the step fast and hermetic.
-# Default interpreter can be overridden: PYTHON_BIN=python3.11 python-venv-install
+# Default interpreter can be overridden: PYTHON_BIN=python3 python-venv-install
 
-PYTHON_BIN="${PYTHON_BIN:-python3.11}"
+PYTHON_BIN="${PYTHON_BIN:-python3}"
 
 # Marker package to detect baked image. Change if your baked image guarantees
 # another project-specific package is present.

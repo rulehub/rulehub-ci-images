@@ -6,7 +6,7 @@
 Centralized CI container images used across RuleHub repositories. Provides a shared base image and small overlays per repo domain.
 
 - Base: `ghcr.io/rulehub/ci-base`
-  - Common tooling: Python 3.11, Node 20, git, jq, yq, syft, cosign, oras, non-root user.
+  - Common tooling: Python 3.12, Node 20, git, jq, yq, syft, cosign, oras, non-root user.
 - Overlays:
   - Policy: `ghcr.io/rulehub/ci-policy` (adds opa, kyverno)
   - Charts: `ghcr.io/rulehub/ci-charts` (adds helm, kubeconform, helm-unittest)
