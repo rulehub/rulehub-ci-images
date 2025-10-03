@@ -1,0 +1,8 @@
+package:
+  catalogers:
+    enabled:
+      - apkdb
+      - dpkgdb
+      - rpmdb
+source:
+  scope: Squashed

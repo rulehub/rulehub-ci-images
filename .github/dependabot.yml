@@ -9,9 +9,6 @@ updates:
       time: "04:00"
       timezone: Etc/UTC
     open-pull-requests-limit: 2
-    labels:
-      - dependencies
-      - security
     groups:
       actions-core:
         patterns:
@@ -35,9 +32,6 @@ updates:
       time: "04:15"
       timezone: Etc/UTC
     open-pull-requests-limit: 2
-    labels:
-      - dependencies
-      - security
     groups:
       base-os:
         patterns:
@@ -64,9 +58,6 @@ updates:
       time: "04:20"
       timezone: Etc/UTC
     open-pull-requests-limit: 2
-    labels:
-      - dependencies
-      - security
     groups:
       base-os:
         patterns:
@@ -93,9 +84,6 @@ updates:
       time: "04:25"
       timezone: Etc/UTC
     open-pull-requests-limit: 2
-    labels:
-      - dependencies
-      - security
     groups:
       base-os:
         patterns:
@@ -122,9 +110,6 @@ updates:
       time: "04:30"
       timezone: Etc/UTC
     open-pull-requests-limit: 2
-    labels:
-      - dependencies
-      - security
     groups:
       base-os:
         patterns:
@@ -151,9 +136,6 @@ updates:
       time: "04:35"
       timezone: Etc/UTC
     open-pull-requests-limit: 2
-    labels:
-      - dependencies
-      - security
     groups:
       base-os:
         patterns:
