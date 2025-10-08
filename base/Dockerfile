@@ -4,7 +4,13 @@ ARG BASE_IMAGE=ubuntu:24.04
 FROM ${BASE_IMAGE}
 
 LABEL org.opencontainers.image.source="https://github.com/rulehub/rulehub-ci-images"
-LABEL org.opencontainers.image.description="RuleHub CI base (Python 3.12, Node 20, jq, yq, syft, cosign, oras, mypy, pip-tools)."
+LABEL org.opencontainers.image.description="RuleHub CI base (Python 3.12, Node 20, jq, yq, syft, grype, cosign, oras, mypy, pip-tools)."
+LABEL org.rulehub.tools.node.major="${NODE_MAJOR}"
+LABEL org.rulehub.tools.yq.version="${YQ_VERSION}"
+LABEL org.rulehub.tools.syft.version="${SYFT_VERSION}"
+LABEL org.rulehub.tools.grype.version="${GRYPE_VERSION}"
+LABEL org.rulehub.tools.cosign.version="${COSIGN_VERSION}"
+LABEL org.rulehub.tools.oras.version="${ORAS_VERSION}"
 
 ARG DEBIAN_FRONTEND=noninteractive
 ARG NODE_MAJOR=20
@@ -12,6 +18,8 @@ ARG YQ_VERSION=4.44.3
 ARG YQ_SHA256=""
 ARG SYFT_VERSION=v1.22.0
 ARG SYFT_TARBALL_SHA256=""
+ARG GRYPE_VERSION=v0.69.1
+ARG GRYPE_TARBALL_SHA256=""
 ARG COSIGN_VERSION=v2.6.0
 ARG COSIGN_SHA256=""
 ARG ORAS_VERSION=v1.2.2
@@ -35,11 +43,14 @@ RUN set -eux; \
     if [ -n "${YQ_SHA256}" ]; then echo "${YQ_SHA256}  /usr/local/bin/yq" | sha256sum -c -; fi; \
     chmod +x /usr/local/bin/yq; yq --version
 
-# Syft, Cosign, ORAS (arch-aware)
+# Syft, Grype, Cosign, ORAS (arch-aware)
 RUN set -eux; \
     curl -fsSL -o /tmp/syft.tgz "https://github.com/anchore/syft/releases/download/${SYFT_VERSION}/syft_${SYFT_VERSION#v}_linux_${TARGETARCH}.tar.gz"; \
     if [ -n "${SYFT_TARBALL_SHA256}" ]; then echo "${SYFT_TARBALL_SHA256}  /tmp/syft.tgz" | sha256sum -c -; fi; \
     tar -xzf /tmp/syft.tgz -C /usr/local/bin syft; rm -f /tmp/syft.tgz; syft version; \
+    curl -fsSL -o /tmp/grype.tgz "https://github.com/anchore/grype/releases/download/${GRYPE_VERSION}/grype_${GRYPE_VERSION#v}_linux_${TARGETARCH}.tar.gz"; \
+    if [ -n "${GRYPE_TARBALL_SHA256}" ]; then echo "${GRYPE_TARBALL_SHA256}  /tmp/grype.tgz" | sha256sum -c -; fi; \
+    tar -xzf /tmp/grype.tgz -C /usr/local/bin grype; rm -f /tmp/grype.tgz; grype version || true; \
     curl -fsSL -o /usr/local/bin/cosign "https://github.com/sigstore/cosign/releases/download/${COSIGN_VERSION}/cosign-linux-${TARGETARCH}"; \
     if [ -n "${COSIGN_SHA256}" ]; then echo "${COSIGN_SHA256}  /usr/local/bin/cosign" | sha256sum -c -; fi; \
     chmod +x /usr/local/bin/cosign; cosign version; \
@@ -54,8 +65,8 @@ RUN set -eux; \
     python3 -m venv "${VENV_PATH}"; \
     . "${VENV_PATH}/bin/activate"; \
     pip install --upgrade pip; \
-    pip install --no-cache-dir ruff pip-audit pip-tools mypy; \
-    ruff --version; pip-audit --version || true; pip-compile --version; mypy --version
+    pip install --no-cache-dir ruff pip-audit pip-tools mypy yamllint mkdocs mkdocs-material mkdocs-get-deps mkdocs-material-extensions ghp-import jsonschema pyyaml; \
+    ruff --version; pip-audit --version || true; pip-compile --version; mypy --version; yamllint --version; mkdocs --version
 
 # Lightweight helper to create .venv and install project requirements
 # Mirrors logic from repo's .github/scripts/python-venv-install.sh but defaults to system python3

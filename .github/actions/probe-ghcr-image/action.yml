@@ -1,0 +1,47 @@
+name: probe-ghcr-image
+description: Probe anonymous pull or local presence of a GHCR image ref
+inputs:
+  image:
+    description: Full image reference (e.g., ghcr.io/org/ci-base:<tag>)
+    required: true
+  assume_available_when_act:
+    description: If true, return can_pull=true under nektos/act
+    required: false
+    default: "true"
+outputs:
+  can_pull:
+    description: "true if image is available locally or pullable"
+    value: ${{ steps.probe.outputs.can_pull }}
+runs:
+  using: composite
+  steps:
+    - id: probe
+      shell: bash
+      env:
+        IMAGE_REF: ${{ inputs.image }}
+        ASSUME_ACT: ${{ inputs.assume_available_when_act }}
+      run: |
+        set -euo pipefail
+        if [ "${GITHUB_ACTOR:-}" = "nektos/act" ] && [ "${ASSUME_ACT}" = "true" ]; then
+          echo "can_pull=true" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+        # If present locally, consider available
+        if docker image inspect "$IMAGE_REF" >/dev/null 2>&1; then
+          echo "can_pull=true" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+        # Try a time-bounded anonymous pull
+        if command -v timeout >/dev/null 2>&1; then
+          if timeout 120s docker pull "$IMAGE_REF"; then
+            echo "can_pull=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "can_pull=false" >> "$GITHUB_OUTPUT"
+          fi
+        else
+          if docker pull "$IMAGE_REF"; then
+            echo "can_pull=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "can_pull=false" >> "$GITHUB_OUTPUT"
+          fi
+        fi

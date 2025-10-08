@@ -1,13 +1,16 @@
 # syntax=docker/dockerfile:1.6
 
-ARG BASE_REF=ghcr.io/<ORG>/ci-base:latest
+ARG BASE_REF=ghcr.io/rulehub/ci-base:latest
 # Under act, overlays are built with classic docker build and
 #   --build-arg BASE_REF=ci-base:localtest
 # so this FROM consumes the locally tagged base image from the daemon.
 FROM ${BASE_REF}
 
-LABEL org.opencontainers.image.source="https://github.com/<ORG>/rulehub-ci-images"
-LABEL org.opencontainers.image.description="RuleHub CI overlay: charts (Helm, kubeconform, helm-unittest)."
+LABEL org.opencontainers.image.source="https://github.com/rulehub/rulehub-ci-images"
+LABEL org.opencontainers.image.description="RuleHub CI overlay: charts (Helm, kubeconform, helm-unittest) atop ci-base (jq, yq, syft, grype, cosign, oras)."
+LABEL org.rulehub.tools.helm.version="${HELM_VERSION}"
+LABEL org.rulehub.tools.kubeconform.version="${KUBECONFORM_VERSION}"
+LABEL org.rulehub.tools.helm_unittest.version="${HELM_UNITTEST_VERSION}"
 
 ARG HELM_VERSION=v3.15.3
 ARG HELM_TARBALL_SHA256=""

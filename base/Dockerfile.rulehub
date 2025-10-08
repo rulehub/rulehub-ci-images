@@ -4,10 +4,10 @@
 # includes the sibling `rulehub/` repository (example in Makefile target).
 # syntax=docker/dockerfile:1.6
 
-ARG BASE_REF=ghcr.io/<ORG>/ci-base:latest
+ARG BASE_REF=ghcr.io/rulehub/ci-base:latest
 FROM ${BASE_REF}
 
-LABEL org.opencontainers.image.source="https://github.com/<ORG>/rulehub-ci-images"
+LABEL org.opencontainers.image.source="https://github.com/rulehub/rulehub-ci-images"
 LABEL org.opencontainers.image.description="RuleHub CI base with RuleHub repo Python deps baked in."
 
 USER root

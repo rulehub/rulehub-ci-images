@@ -1,15 +1,17 @@
 # syntax=docker/dockerfile:1.6
 
-ARG BASE_REF=ghcr.io/<ORG>/ci-base:latest
+ARG BASE_REF=ghcr.io/rulehub/ci-base:latest
 # Under act, the workflow builds overlays with classic docker build and passes
 #   --build-arg BASE_REF=ci-base:localtest
 # which makes this FROM consume the locally tagged base image.
 FROM ${BASE_REF}
 
-LABEL org.opencontainers.image.source="https://github.com/<ORG>/rulehub-ci-images"
+LABEL org.opencontainers.image.source="https://github.com/rulehub/rulehub-ci-images"
 LABEL org.opencontainers.image.description="RuleHub CI overlay: policy (OPA, Kyverno)."
+LABEL org.rulehub.tools.opa.version="${OPA_VERSION}"
+LABEL org.rulehub.tools.kyverno.version="${KYVERNO_VERSION}"
 
-ARG OPA_VERSION=1.7.1
+ARG OPA_VERSION=1.8.0
 ARG OPA_SHA256=""
 ARG KYVERNO_VERSION=1.15.1
 ARG KYVERNO_TARBALL_SHA256=""

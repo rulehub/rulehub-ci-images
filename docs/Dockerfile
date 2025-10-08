@@ -1,9 +1,9 @@
 # syntax=docker/dockerfile:1.6
 
-ARG BASE_REF=ghcr.io/<ORG>/ci-base:latest
+ARG BASE_REF=ghcr.io/rulehub/ci-base:latest
 FROM ${BASE_REF}
 
-LABEL org.opencontainers.image.source="https://github.com/<ORG>/rulehub-ci-images"
+LABEL org.opencontainers.image.source="https://github.com/rulehub/rulehub-ci-images"
 LABEL org.opencontainers.image.description="RuleHub CI overlay: docs (lychee + jq + python runtime)."
 
 # Lychee link checker (static binary via cargo prebuilt image layer)

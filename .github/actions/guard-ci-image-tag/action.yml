@@ -1,0 +1,20 @@
+name: guard-ci-image-tag
+description: Enforce non-latest CI image tag and encourage pinned tags via repo var
+inputs:
+  ci_image_tag:
+    description: CI image tag provided via workflow_dispatch input
+    required: false
+    default: ""
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        input_tag="${{ inputs.ci_image_tag }}"
+        if [ "$input_tag" = "latest" ]; then
+          echo "ci_image_tag must not be 'latest'. Use an immutable tag (e.g., 2025.10.03-<sha> or vX.Y.Z)." >&2
+          exit 1
+        fi
+        if [ -z "$input_tag" ]; then
+          echo "Note: ci_image_tag not provided. Ensure repository variable CI_IMAGE_TAG is set to a pinned tag to avoid drift." >&2
+        fi

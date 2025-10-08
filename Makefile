@@ -32,7 +32,7 @@ TAG_FRONTEND := $(REG)/ci-frontend:$(FRONTEND_REF)
 LOG_DIR := logs
 
 .PHONY: help print-config verify-repo docker-versions \
-        build base policy charts frontend \
+	build base policy charts frontend \
         push push-base push-policy push-charts push-frontend \
         images clean
 
@@ -78,6 +78,12 @@ docker-versions:
 
 # Aggregate build
 build: base policy charts frontend
+
+# Convenience: build dev-local tags for act imageMap usage
+.PHONY: dev-local
+dev-local: ## Build base+policy with BASE_REF=dev-local POLICY_REF=dev-local
+	@echo "=== Build dev-local (base+policy) ==="
+	@BASE_REF=dev-local POLICY_REF=dev-local $(MAKE) base policy
 
 # Individual builds
 base: verify-repo

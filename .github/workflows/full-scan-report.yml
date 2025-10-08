@@ -1,86 +1,115 @@
 name: full-scan-report
 
 on:
-    workflow_dispatch:
-        inputs:
-            tags:
-                description: "Image tags to scan (comma-separated, default: latest)"
-                required: false
-                default: "latest"
+  workflow_dispatch:
+    inputs:
+      tags:
+        description: "Image tags to scan (comma-separated, default: 2025.10.03-f072ceb5)"
+        required: false
+        default: "2025.10.03-f072ceb5"
 
 permissions:
-    contents: read
-    packages: read
+  contents: read
+  packages: read
 
 env:
-    REG: ghcr.io/rulehub
+  REG: ghcr.io/rulehub
 
 jobs:
-    scan:
-        name: Full ecosystem scan (visibility only)
-        runs-on: ubuntu-latest
-        strategy:
-            fail-fast: false
-            matrix:
-                image: ["ci-base", "ci-policy", "ci-charts", "ci-frontend"]
-                include:
-                    - image: "ci-base"
-                      label: base
-                    - image: "ci-policy"
-                      label: policy
-                    - image: "ci-charts"
-                      label: charts
-                    - image: "ci-frontend"
-                      label: frontend
-        steps:
-            - uses: actions/checkout@ff7abcd0c3c05ccf6adc123a8cd1fd4fb30fb493
+  scan:
+    name: Full ecosystem scan (visibility only)
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/rulehub/ci-base:2025.10.03-f072ceb5
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ["ci-base", "ci-policy", "ci-charts", "ci-frontend"]
+        include:
+          - image: "ci-base"
+            label: base
+          - image: "ci-policy"
+            label: policy
+          - image: "ci-charts"
+            label: charts
+          - image: "ci-frontend"
+            label: frontend
+    steps:
+      - uses: actions/checkout@ff7abcd0c3c05ccf6adc123a8cd1fd4fb30fb493
 
-            - name: Parse tags input
-              id: tags
-              run: |
-                  T="${{ github.event.inputs.tags || 'latest' }}"
-                  echo "tags=$T" >> "$GITHUB_OUTPUT"
+      - name: Parse tags input
+        id: tags
+        shell: bash
+        run: |
+          T="${{ github.event.inputs.tags || '2025.10.03-f072ceb5' }}"
+          # Under act we build local images as part of Stage 1 with tag 'latest'.
+          # Override tags to 'latest' to scan local images via the docker daemon.
+          if [ "${GITHUB_ACTOR:-}" = "nektos/act" ]; then
+            T="latest"
+          fi
+          echo "tags=$T" >> "$GITHUB_OUTPUT"
 
-            - name: Login to GHCR
-              run: echo "${{ github.token }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+      - name: Login to GHCR
+        if: ${{ github.actor != 'nektos/act' }}
+        run: echo "${{ github.token }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
 
-            - name: Install syft & grype (pinned)
-              uses: ./.github/actions/install-supplychain-tools
-              with:
-                  syft-version: "0.96.0"
-                  grype-version: "0.69.1"
-                  syft-sha: "abc1b66ba07241eaa667a78900dabab4a4e7a96a1776b39628a4de3b61dfa30d"
-                  grype-sha: "53ad7a96d0561fdacc82519972025ba0f1a74e16edfdf628d4ce16cc3c714817"
+      # syft & grype are available inside the container image
 
-            - name: Pull image (${{ matrix.label }})
-              run: |
-                  IFS=',' read -r -a TAGS <<< "${{ steps.tags.outputs.tags }}"
-                  for tag in "${TAGS[@]}"; do
-                    docker pull "$REG/${{ matrix.image }}:$tag"
-                  done
+      - name: Detect scan capability and set image source
+        id: detect
+        shell: bash
+        run: |
+          SCAN_ENABLE=1
+          IMG_SRC_PREFIX=""
+          if [ "${GITHUB_ACTOR:-}" = "nektos/act" ]; then
+            # Under act, GHCR auth and docker daemon access are unreliable; skip scans.
+            SCAN_ENABLE=0
+            echo "[detect] act environment detected; disabling scans (visibility-only)."
+          fi
+          echo "IMG_SRC=${IMG_SRC_PREFIX}" >> "$GITHUB_ENV"
+          echo "SCAN_ENABLE=${SCAN_ENABLE}" >> "$GITHUB_ENV"
+          echo "scan_enable=$SCAN_ENABLE" >> "$GITHUB_OUTPUT"
 
-            - name: Generate SBOM (full, ${{ matrix.label }})
-              run: |
-                  IFS=',' read -r -a TAGS <<< "${{ steps.tags.outputs.tags }}"
-                  for tag in "${TAGS[@]}"; do
-                    syft "$REG/${{ matrix.image }}:$tag" -o syft-json > "sbom-full-${{ matrix.image }}-$tag.syft.json"
-                  done
+      - name: Pull image (${{ matrix.label }})
+        if: ${{ github.actor != 'nektos/act' }}
+        shell: bash
+        run: |
+          IFS=',' read -r -a TAGS <<< "${{ steps.tags.outputs.tags }}"
+          for tag in "${TAGS[@]}"; do
+            docker pull "$REG/${{ matrix.image }}:$tag"
+          done
 
-            - name: Vulnerability scan (full, non-blocking, ${{ matrix.label }})
-              env:
-                  GRYPE_CHECK_FOR_APP_UPDATE: "false"
-              continue-on-error: true
-              run: |
-                  IFS=',' read -r -a TAGS <<< "${{ steps.tags.outputs.tags }}"
-                  for tag in "${TAGS[@]}"; do
-                    grype "sbom:sbom-full-${{ matrix.image }}-$tag.syft.json" -o json > "grype-${{ matrix.image }}-$tag.json" || true
-                  done
+      - name: Generate SBOM (full, ${{ matrix.label }})
+        if: ${{ steps.detect.outputs.scan_enable == '1' }}
+        shell: bash
+        run: |
+          IFS=',' read -r -a TAGS <<< "${{ steps.tags.outputs.tags }}"
+          for tag in "${TAGS[@]}"; do
+            syft "${IMG_SRC}${REG}/${{ matrix.image }}:$tag" -o syft-json > "sbom-full-${{ matrix.image }}-$tag.syft.json"
+          done
 
-            - name: Upload artifacts (${{ matrix.label }})
-              if: always()
-              uses: actions/upload-artifact@v4
-              with:
-                  name: full-scan-${{ matrix.label }}
-                  path: |
-                      sbom-full-${{ matrix.image }}-*.syft.json
-                      grype-${{ matrix.image }}-*.json
+      - name: Vulnerability scan (full, non-blocking, ${{ matrix.label }})
+        if: ${{ steps.detect.outputs.scan_enable == '1' }}
+        env:
+          GRYPE_CHECK_FOR_APP_UPDATE: "false"
+        continue-on-error: true
+        shell: bash
+        run: |
+          IFS=',' read -r -a TAGS <<< "${{ steps.tags.outputs.tags }}"
+          for tag in "${TAGS[@]}"; do
+            grype "sbom:sbom-full-${{ matrix.image }}-$tag.syft.json" -o json > "grype-${{ matrix.image }}-$tag.json" || true
+          done
+
+      - name: Skip scan (no docker or registry auth under act)
+        if: ${{ steps.detect.outputs.scan_enable != '1' }}
+        run: |
+          echo "Skipping SBOM + vulnerability scan for ${{ matrix.label }}: no docker socket or registry auth available under act."
+
+      - name: Upload artifacts (${{ matrix.label }})
+        if: ${{ always() && github.actor != 'nektos/act' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-scan-${{ matrix.label }}
+          path: |
+            sbom-full-${{ matrix.image }}-*.syft.json
+            grype-${{ matrix.image }}-*.json
