@@ -23,7 +23,11 @@ COPY rulehub/requirements-dev.txt /tmp/requirements-dev.txt
 # to CI jobs even when the workspace is mounted into the container at runtime.
 # Installing globally avoids the problem where a .venv created inside the
 # repository workspace would be masked by a mounted volume.
-COPY rulehub-ci-images/base/scripts/install-reqs.sh /tmp/install-reqs.sh
+# Allow flexible build context: when the build context is the parent directory,
+# files are under rulehub-ci-images/; when the context is this repo root, files
+# are under base/ directly. Parameterize with IMAGES_PREFIX.
+ARG IMAGES_PREFIX=rulehub-ci-images/
+COPY ${IMAGES_PREFIX}base/scripts/install-reqs.sh /tmp/install-reqs.sh
 RUN chmod +x /tmp/install-reqs.sh && /tmp/install-reqs.sh && rm -f /tmp/install-reqs.sh
 
 USER 1001

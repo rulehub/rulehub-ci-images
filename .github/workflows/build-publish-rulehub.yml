@@ -17,12 +17,59 @@ jobs:
     env:
       REG: ghcr.io/${{ github.repository_owner }}
       IS_ACT: "false"
+      SKIP_RULEHUB: "0"
     steps:
       - name: Checkout
         uses: actions/checkout@v5
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      - name: Checkout sibling rulehub repo (for Docker build context)
+        # Under ACT/GitHub, the workspace does not include the parent directory.
+        # We fetch the rulehub repository into ./rulehub so Dockerfile.rulehub can COPY requirements.
+        uses: actions/checkout@v5
+        continue-on-error: true
+        with:
+          repository: ${{ github.repository_owner }}/rulehub
+          path: rulehub
+          fetch-depth: 1
+
+      - name: Link sibling rulehub if available
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ ! -d rulehub ] && [ -d ../rulehub ]; then
+            echo "Linking ../rulehub -> ./rulehub"
+            ln -s ../rulehub rulehub
+          fi
+
+      - name: Ensure rulehub requirements present
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -f rulehub/requirements.txt ] || [ -f rulehub/requirements.lock ]; then
+            echo "Found rulehub requirements in ./rulehub";
+            exit 0;
+          fi
+          echo "rulehub directory missing or incomplete; attempting public fetch of requirement files from main"
+          mkdir -p rulehub
+          base_url="https://raw.githubusercontent.com/${{ github.repository_owner }}/rulehub/main"
+          for f in requirements.lock requirements.txt requirements-dev.lock requirements-dev.txt; do
+            echo "Fetching $f";
+            curl -fsSL "$base_url/$f" -o "rulehub/$f" || true
+          done
+          if [ ! -f rulehub/requirements.txt ] && [ ! -f rulehub/requirements.lock ]; then
+            echo "WARNING: Unable to populate rulehub requirements; marking SKIP_RULEHUB=1 (likely offline ACT)." >&2
+            echo "SKIP_RULEHUB=1" >> "$GITHUB_ENV"
+            exit 0
+          fi
+
+      - name: Debug workspace layout
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "PWD: $(pwd)"
+          ls -la
+          echo "--- rulehub top ---"; ls -la rulehub || true
+          echo "--- find rulehub (depth 2) ---"; find rulehub -maxdepth 2 -type f -print 2>/dev/null | sort || true
 
       - name: Detect act
         shell: bash
@@ -30,6 +77,10 @@ jobs:
           if [ "${ACT:-}" = "true" ] || [ "${IS_ACT:-}" = "true" ]; then
             echo "IS_ACT=true" >> "$GITHUB_ENV"
           fi
+
+      - name: Set up Docker Buildx
+        if: ${{ env.IS_ACT != 'true' }}
+        uses: docker/setup-buildx-action@v3
 
       - name: Compute tags (ci-base-rulehub)
         id: meta
@@ -47,16 +98,55 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build base (local)
+        continue-on-error: ${{ env.IS_ACT == 'true' }}
         run: |
           make base
         working-directory: ./
 
       - name: Build base-rulehub
+        if: env.SKIP_RULEHUB != '1'
+        continue-on-error: ${{ env.IS_ACT == 'true' }}
+        shell: bash
         run: |
-          make base-rulehub
+          set -euo pipefail
+          echo "=== make base-rulehub ==="
+          if ! make base-rulehub; then
+            echo "--- logs/build-base-rulehub.log (tail -200) ---"; tail -n 200 logs/build-base-rulehub.log 2>/dev/null || true
+            echo "--- logs/build-base.log (tail -200) ---"; tail -n 200 logs/build-base.log 2>/dev/null || true
+            echo "--- docker images (filter ci-) ---"; docker images | grep -E "ci-(base|policy|charts|frontend)" || true
+            exit 1
+          fi
         working-directory: ./
 
+      - name: Probe ci-base-rulehub image and set skip
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! docker image inspect "${REG}/ci-base-rulehub:latest" >/dev/null 2>&1; then
+            echo "SKIP_RULEHUB=1" >> "$GITHUB_ENV"
+            echo "ci-base-rulehub:latest not present locally; skipping tag/publish steps."
+          fi
+
+      - name: Upload build logs (always, CI only)
+        if: ${{ always() && env.IS_ACT != 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs-base-rulehub
+          path: |
+            logs/*.log
+            artifacts/*.log
+
+      - name: Print build logs (ACT only)
+        if: ${{ always() && env.IS_ACT == 'true' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "--- logs (ls) ---"; ls -la logs 2>/dev/null || true
+          for f in logs/*.log artifacts/*.log; do
+            [ -f "$f" ] || continue; echo "--- $f (tail -200) ---"; tail -n 200 "$f" || true; done
+
       - name: Tag immutable refs (ci-base-rulehub)
+        if: env.SKIP_RULEHUB != '1'
         env:
           IMAGE: ci-base-rulehub
         shell: bash
@@ -65,7 +155,7 @@ jobs:
           printf "%s\n" "${{ steps.meta.outputs.tags }}" | bash .github/scripts/retag-and-push.sh
 
       - name: Push ci-base-rulehub (all tags)
-        if: env.IS_ACT != 'true'
+        if: env.IS_ACT != 'true' && env.SKIP_RULEHUB != '1'
         env:
           IMAGE: ci-base-rulehub
         shell: bash
@@ -75,7 +165,7 @@ jobs:
           printf "%s\n" "${{ steps.meta.outputs.tags }}" | bash .github/scripts/retag-and-push.sh
 
       - name: Install syft & grype (pinned)
-        if: ${{ env.IS_ACT != 'true' }}
+        if: ${{ env.IS_ACT != 'true' && env.SKIP_RULEHUB != '1' }}
         uses: ./.github/actions/install-supplychain-tools
         with:
           syft-version: "0.96.0"
@@ -84,7 +174,7 @@ jobs:
           grype-sha: "53ad7a96d0561fdacc82519972025ba0f1a74e16edfdf628d4ce16cc3c714817"
 
       - name: Compute published immutable tag (best)
-        if: env.IS_ACT != 'true'
+        if: env.IS_ACT != 'true' && env.SKIP_RULEHUB != '1'
         id: chosen
         shell: bash
         run: |
@@ -94,7 +184,7 @@ jobs:
           echo "Selected ci-base-rulehub tag: $TAG" >> "$GITHUB_STEP_SUMMARY"
 
       - name: SBOM + OS-only vuln scan (ci-base-rulehub)
-        if: ${{ env.IS_ACT != 'true' }}
+        if: ${{ env.IS_ACT != 'true' && env.SKIP_RULEHUB != '1' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -102,7 +192,7 @@ jobs:
           bash .github/scripts/sbom-and-os-scan.sh "$ref"
 
       - name: Upload SBOM artifact (ci-base-rulehub)
-        if: ${{ always() && env.IS_ACT != 'true' }}
+        if: ${{ always() && env.IS_ACT != 'true' && env.SKIP_RULEHUB != '1' }}
         uses: actions/upload-artifact@v4
         with:
           name: sbom-ci-base-rulehub
@@ -111,7 +201,7 @@ jobs:
             sbom-ci-base-rulehub*-os.syft*.json
 
       - name: Dispatch update to rulehub-charts (optional)
-        if: env.IS_ACT != 'true'
+        if: env.IS_ACT != 'true' && env.SKIP_RULEHUB != '1'
         env:
           OWNER: ${{ github.repository_owner }}
           TAG: ${{ steps.chosen.outputs.tag }}

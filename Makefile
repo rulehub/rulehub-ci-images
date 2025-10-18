@@ -188,8 +188,19 @@ base-rulehub: verify-repo
 	# Build must use a context that includes the sibling rulehub/ directory so
 	# the Dockerfile can COPY rulehub/requirements*. We assume IMAGES_REPO is the
 	# repo root containing the base/ and the sibling rulehub/ directory.
-	# Use parent directory as build context so sibling `rulehub/` is available
-	@docker build --build-arg BASE_REF="$(TAG_BASE)" -f "$(IMAGES_REPO)/base/Dockerfile.rulehub" -t "$(TAG_BASE_RULEHUB)" "$(IMAGES_REPO)/.." 2>&1 | tee -a "$(LOG_DIR)/build-base-rulehub.log"
+	# Prefer a local ./rulehub checkout if present (as ensured by CI workflow),
+	# otherwise fall back to using the parent directory as context.
+	@if [ -d "$(IMAGES_REPO)/rulehub" ]; then \
+		echo "[base-rulehub] Using current repo as build context (./rulehub present)" | tee -a "$(LOG_DIR)/build-base-rulehub.log"; \
+		DOCKER_BUILDKIT=1 docker build --build-arg BASE_REF="$(TAG_BASE)" \
+			--build-arg IMAGES_PREFIX="" \
+			-f "$(IMAGES_REPO)/base/Dockerfile.rulehub" -t "$(TAG_BASE_RULEHUB)" "$(IMAGES_REPO)" 2>&1 | tee -a "$(LOG_DIR)/build-base-rulehub.log"; \
+	else \
+		echo "[base-rulehub] Using parent directory as build context" | tee -a "$(LOG_DIR)/build-base-rulehub.log"; \
+		DOCKER_BUILDKIT=1 docker build --build-arg BASE_REF="$(TAG_BASE)" \
+			--build-arg IMAGES_PREFIX="rulehub-ci-images/" \
+			-f "$(IMAGES_REPO)/base/Dockerfile.rulehub" -t "$(TAG_BASE_RULEHUB)" "$(IMAGES_REPO)/.." 2>&1 | tee -a "$(LOG_DIR)/build-base-rulehub.log"; \
+	fi
 
 .PHONY: push-base-rulehub
 push-base-rulehub:
