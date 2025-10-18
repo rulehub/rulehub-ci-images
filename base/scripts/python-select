@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# python-select: Exec a specific Python version available in the image
+# Usage:
+#   python-select <3.11|3.12|3.13> [args...]
+# If no args other than version are provided, prints resolved binary path.
+VER="${1:-}"
+if [ -z "$VER" ]; then
+  echo "Usage: python-select <3.11|3.12|3.13> [args...]" >&2
+  exit 2
+fi
+shift || true
+BIN="/usr/bin/python${VER}"
+if [ ! -x "$BIN" ]; then
+  echo "python-select: $BIN not found" >&2
+  exit 1
+fi
+if [ "$#" -eq 0 ]; then
+  echo "$BIN"
+  exit 0
+fi
+exec "$BIN" "$@"

@@ -31,6 +31,13 @@ jobs:
             echo "IS_ACT=true" >> "$GITHUB_ENV"
           fi
 
+      - name: Compute tags (ci-base-rulehub)
+        id: meta
+        env:
+          IMAGE: ci-base-rulehub
+        shell: bash
+        run: bash .github/scripts/compute-tags.sh
+
       - name: Log in to GHCR
         if: env.IS_ACT != 'true'
         uses: docker/login-action@v3
@@ -49,8 +56,64 @@ jobs:
           make base-rulehub
         working-directory: ./
 
-      - name: Push base-rulehub
-        if: env.IS_ACT != 'true'
+      - name: Tag immutable refs (ci-base-rulehub)
+        env:
+          IMAGE: ci-base-rulehub
+        shell: bash
         run: |
-          make push-base-rulehub
-        working-directory: ./
+          set -euo pipefail
+          printf "%s\n" "${{ steps.meta.outputs.tags }}" | bash .github/scripts/retag-and-push.sh
+
+      - name: Push ci-base-rulehub (all tags)
+        if: env.IS_ACT != 'true'
+        env:
+          IMAGE: ci-base-rulehub
+        shell: bash
+        run: |
+          set -euo pipefail
+          export PUSH=1
+          printf "%s\n" "${{ steps.meta.outputs.tags }}" | bash .github/scripts/retag-and-push.sh
+
+      - name: Install syft & grype (pinned)
+        if: ${{ env.IS_ACT != 'true' }}
+        uses: ./.github/actions/install-supplychain-tools
+        with:
+          syft-version: "0.96.0"
+          grype-version: "0.69.1"
+          syft-sha: "abc1b66ba07241eaa667a78900dabab4a4e7a96a1776b39628a4de3b61dfa30d"
+          grype-sha: "53ad7a96d0561fdacc82519972025ba0f1a74e16edfdf628d4ce16cc3c714817"
+
+      - name: Compute published immutable tag (best)
+        if: env.IS_ACT != 'true'
+        id: chosen
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG=$(printf "%s\n" "${{ steps.meta.outputs.tags }}" | bash .github/scripts/choose-best-tag.sh)
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Selected ci-base-rulehub tag: $TAG" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: SBOM + OS-only vuln scan (ci-base-rulehub)
+        if: ${{ env.IS_ACT != 'true' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ref="${REG}/ci-base-rulehub:${{ steps.chosen.outputs.tag }}"
+          bash .github/scripts/sbom-and-os-scan.sh "$ref"
+
+      - name: Upload SBOM artifact (ci-base-rulehub)
+        if: ${{ always() && env.IS_ACT != 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-ci-base-rulehub
+          path: |
+            sbom-ci-base-rulehub*.spdx.json
+            sbom-ci-base-rulehub*-os.syft*.json
+
+      - name: Dispatch update to rulehub-charts (optional)
+        if: env.IS_ACT != 'true'
+        env:
+          OWNER: ${{ github.repository_owner }}
+          TAG: ${{ steps.chosen.outputs.tag }}
+        shell: bash
+        run: bash .github/scripts/dispatch-tag-update.sh "$OWNER" "$TAG"

@@ -3,3 +3,5 @@ artifacts/
 act_report/
 .github/act.secrets
 .env
+.venv-lock
+.venv/

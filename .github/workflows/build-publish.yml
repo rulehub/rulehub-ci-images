@@ -36,14 +36,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@ff7abcd0c3c05ccf6adc123a8cd1fd4fb30fb493
-      - if: env.IS_ACT != 'true'
-        uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
       - name: Detect act
         run: |
           if [ "${ACT:-}" = "true" ] || [ "${IS_ACT:-}" = "true" ]; then
             echo "IS_ACT=true" >> "$GITHUB_ENV"
           fi
+      - if: env.IS_ACT != 'true'
+        uses: docker/setup-qemu-action@v3
+      - if: env.IS_ACT != 'true'
+        uses: docker/setup-buildx-action@v3
       - name: Adjust platforms for act
         if: env.IS_ACT == 'true'
         run: |
@@ -90,13 +91,15 @@ jobs:
           # Build and load the first tag; tags may contain newlines, so pick the first
           FIRST_TAG=$(echo "$TAGS" | head -n1)
           mkdir -p ./artifacts
-          # capture plain progress to a file so act diagnostics include build logs
-          # When running under act, prefer the locally-built base image to avoid
-          # pulling from GHCR which may reject anonymous requests. Pass BASE_REF
-          # build-arg so downstream Dockerfiles referencing ARG BASE_REF will use
-          # the local ci-base:localtest image.
-          docker buildx build --load --platform linux/amd64 -t "$FIRST_TAG" -t ci-base:localtest \
-            --build-arg BASE_REF=ci-base:localtest ./base --progress=plain 2>&1 | tee ./artifacts/build-base-output.log
+          # Capture build logs to artifacts so act diagnostics include them.
+          # Under act, avoid buildx docker-container builder to reduce memory usage.
+          # Use classic docker build with BuildKit and local base tagging.
+          DOCKER_BUILDKIT=1 docker build --pull=false -t "$FIRST_TAG" -t ci-base:localtest \
+            --build-arg BASE_REF=ci-base:localtest \
+            --build-arg SKIP_TOOLS=1 \
+            --build-arg SKIP_VENV=1 \
+            --build-arg ENFORCE_CHECKSUMS=0 \
+            ./base 2>&1 | tee ./artifacts/build-base-output.log
       - name: Build & push base (CI)
         if: env.IS_ACT != 'true'
         id: base
@@ -158,14 +161,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@ff7abcd0c3c05ccf6adc123a8cd1fd4fb30fb493
-      - if: env.IS_ACT != 'true'
-        uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
       - name: Detect act
         run: |
           if [ "${ACT:-}" = "true" ] || [ "${IS_ACT:-}" = "true" ]; then
             echo "IS_ACT=true" >> "$GITHUB_ENV"
           fi
+      - if: env.IS_ACT != 'true'
+        uses: docker/setup-qemu-action@v3
+      - if: env.IS_ACT != 'true'
+        uses: docker/setup-buildx-action@v3
       - name: Adjust platforms for act
         if: env.IS_ACT == 'true'
         run: |
@@ -275,14 +279,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@ff7abcd0c3c05ccf6adc123a8cd1fd4fb30fb493
-      - if: env.IS_ACT != 'true'
-        uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
       - name: Detect act
         run: |
           if [ "${ACT:-}" = "true" ] || [ "${IS_ACT:-}" = "true" ]; then
             echo "IS_ACT=true" >> "$GITHUB_ENV"
           fi
+      - if: env.IS_ACT != 'true'
+        uses: docker/setup-qemu-action@v3
+      - if: env.IS_ACT != 'true'
+        uses: docker/setup-buildx-action@v3
       - name: Adjust platforms for act
         if: env.IS_ACT == 'true'
         run: |
@@ -360,6 +365,7 @@ jobs:
           docker run --rm ${{ env.REG }}/ci-charts:latest helm version --short
           docker run --rm ${{ env.REG }}/ci-charts:latest kubeconform -v
           docker run --rm ${{ env.REG }}/ci-charts:latest sh -lc 'HELM_PLUGINS=/usr/local/helm-plugins helm unittest --help >/dev/null 2>&1 && echo ok || (echo fail; exit 1)'
+          docker run --rm ${{ env.REG }}/ci-charts:latest ct version || docker run --rm ${{ env.REG }}/ci-charts:latest ct --help
       - name: Generate SBOM (charts)
         if: ${{ env.IS_ACT != 'true' }}
         run: syft ${{ env.REG }}/ci-charts:latest -o spdx-json > sbom-ci-charts.spdx.json
@@ -383,20 +389,59 @@ jobs:
       - name: Summarize digest (charts)
         if: env.IS_ACT != 'true'
         run: echo "ci-charts@${{ steps.charts.outputs.digest }}" >> "$GITHUB_STEP_SUMMARY"
+      - name: Compute published immutable tag for ci-charts
+        if: env.IS_ACT != 'true'
+        id: charts-tag
+        run: |
+          set -euo pipefail
+          # Choose a stable, immutable tag to broadcast: prefer semver tag if present, else date+sha.
+          best=""
+          while IFS= read -r tag; do
+            case "$tag" in
+              *:v[0-9]*.[0-9]*.[0-9]*) best="$tag";;
+              *:[0-9][0-9][0-9][0-9].*) if [ -z "$best" ]; then best="$tag"; fi;;
+            esac
+          done < <(printf "%s\n" "${{ steps.meta.outputs.tags }}")
+          # Strip registry/repo prefix to get just the tag value after the last ':'
+          ref_tag="${best##*:}"
+          echo "tag=$ref_tag" >> "$GITHUB_OUTPUT"
+          echo "Selected ci-charts tag: $ref_tag" >> "$GITHUB_STEP_SUMMARY"
+      - name: Dispatch update to rulehub-charts (optional)
+        if: env.IS_ACT != 'true'
+        env:
+          OWNER: ${{ github.repository_owner }}
+          TAG: ${{ steps.charts-tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          # Provide a PAT via env DISPATCH_TOKEN with repo:write scope to enable cross-repo dispatch.
+          TOKEN="${DISPATCH_TOKEN:-}"
+          if [ -z "$TOKEN" ]; then
+            echo "CHARTS_REPO_TOKEN not set; skipping repository_dispatch to ${OWNER}/rulehub-charts" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          echo "Dispatching ci-image-published to ${OWNER}/rulehub-charts with tag=${TAG}"
+          curl -sSf -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${TOKEN}" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            https://api.github.com/repos/${OWNER}/rulehub-charts/dispatches \
+            -d "$(jq -n --arg tag "$TAG" '{event_type:"ci-image-published", client_payload:{tag:$tag}}')"
+          echo "repository_dispatch sent to ${OWNER}/rulehub-charts" >> "$GITHUB_STEP_SUMMARY"
 
   build-frontend:
     needs: build-base
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@ff7abcd0c3c05ccf6adc123a8cd1fd4fb30fb493
-      - if: env.IS_ACT != 'true'
-        uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
       - name: Detect act
         run: |
           if [ "${ACT:-}" = "true" ] || [ "${IS_ACT:-}" = "true" ]; then
             echo "IS_ACT=true" >> "$GITHUB_ENV"
           fi
+      - if: env.IS_ACT != 'true'
+        uses: docker/setup-qemu-action@v3
+      - if: env.IS_ACT != 'true'
+        uses: docker/setup-buildx-action@v3
       - name: Adjust platforms for act
         if: env.IS_ACT == 'true'
         run: |

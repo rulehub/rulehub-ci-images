@@ -22,7 +22,7 @@ fi
 if [ ! -d .venv ]; then
   if [ "$SYSTEM_HAS_MARKER" -eq 1 ]; then
     # fast-path: venv that can see system site-packages so we don't reinstall
-    "$PYTHON_BIN" -m venv --system-site-packages .venv
+    "$PYTHON_BIN" -m venv --system-site-packages .venv || "$PYTHON_BIN" -m venv .venv
   else
     "$PYTHON_BIN" -m venv .venv
   fi
@@ -31,7 +31,30 @@ fi
 # Activate the venv so further operations target it
 . .venv/bin/activate
 
-python -m pip install -U pip
+# Ensure pip is available inside the venv (some distros ship venv without pip)
+if [ ! -x .venv/bin/pip ]; then
+  echo "pip not found in .venv; bootstrapping via ensurepip"
+  .venv/bin/python -m ensurepip --upgrade || true
+  if [ ! -x .venv/bin/pip ]; then
+  echo "ensurepip unavailable or failed; attempting get-pip bootstrap"
+  python - <<'PY' || true
+import sys, urllib.request, subprocess, os
+url = 'https://bootstrap.pypa.io/get-pip.py'
+dst = 'get-pip.py'
+try:
+  with urllib.request.urlopen(url, timeout=20) as r, open(dst, 'wb') as f:
+    f.write(r.read())
+  subprocess.run([os.path.abspath('.venv/bin/python'), dst, '--upgrade'], check=False)
+finally:
+  try:
+    os.remove(dst)
+  except Exception:
+    pass
+PY
+  fi
+fi
+
+python -m pip install -U pip || true
 
 if [ "$SYSTEM_HAS_MARKER" -eq 1 ]; then
   echo "System-wide Python packages present (marker=${MARKER_PKG}); skipping pip installs"

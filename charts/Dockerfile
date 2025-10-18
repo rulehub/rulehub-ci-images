@@ -17,6 +17,7 @@ ARG HELM_TARBALL_SHA256=""
 ARG KUBECONFORM_VERSION=v0.6.7
 ARG KUBECONFORM_TARBALL_SHA256=""
 ARG HELM_UNITTEST_VERSION=0.5.1
+ARG CT_VERSION=v3.10.1
 ARG TARGETARCH
 
 USER root
@@ -44,5 +45,37 @@ RUN set -eux; \
     export HELM_PLUGINS="$HELM_PLUGINS_DIR"; \
     helm plugin install https://github.com/helm-unittest/helm-unittest --version ${HELM_UNITTEST_VERSION}; \
     helm unittest --help >/dev/null
+
+# pre-commit
+# CI path: install into the base venv. act/local path (SKIP_VENV=1): create a small local venv to avoid
+# Debian's externally-managed PEP 668 restriction on system-wide pip installs.
+RUN set -eux; \
+    if [ -n "${VENV_PATH:-}" ] && [ -f "${VENV_PATH}/bin/activate" ] && [ "${SKIP_VENV:-0}" != "1" ]; then \
+        . "${VENV_PATH}/bin/activate"; \
+        pip install --no-cache-dir --upgrade pre-commit; \
+        pre-commit --version; \
+    else \
+        echo "[charts][warn] VENV not available or SKIP_VENV=1; creating local venv for pre-commit"; \
+        CHARTS_VENV="/opt/charts-venv"; \
+        python3 -m venv "$CHARTS_VENV"; \
+        "$CHARTS_VENV/bin/pip" install --no-cache-dir --upgrade pip; \
+        "$CHARTS_VENV/bin/pip" install --no-cache-dir --upgrade pre-commit; \
+        ln -sf "$CHARTS_VENV/bin/pre-commit" /usr/local/bin/pre-commit; \
+        pre-commit --version; \
+    fi
+
+# chart-testing (ct) CLI
+RUN set -eux; \
+    CT_ARCH="amd64"; \
+    if [ "${TARGETARCH}" = "arm64" ]; then CT_ARCH="arm64"; fi; \
+    curl -fsSL -o /tmp/ct.tgz "https://github.com/helm/chart-testing/releases/download/${CT_VERSION}/chart-testing_${CT_VERSION#v}_linux_${CT_ARCH}.tar.gz"; \
+    TMP_DIR="$(mktemp -d)"; \
+    tar -xzf /tmp/ct.tgz -C "$TMP_DIR"; \
+    CT_BIN_PATH="$(find "$TMP_DIR" -type f -name ct -perm -011 -print -quit || true)"; \
+    if [ -z "$CT_BIN_PATH" ]; then CT_BIN_PATH="$(find "$TMP_DIR" -type f -name ct -print -quit || true)"; fi; \
+    if [ -z "$CT_BIN_PATH" ]; then echo "ct binary not found in archive" >&2; exit 1; fi; \
+    install -m 0755 "$CT_BIN_PATH" /usr/local/bin/ct; \
+    rm -rf /tmp/ct.tgz "$TMP_DIR"; \
+    ct version || ct --help
 
 USER 1001

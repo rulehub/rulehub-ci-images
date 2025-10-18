@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       tags:
-        description: "Image tags to scan (comma-separated, default: 2025.10.03-f072ceb5)"
+        description: "Image tags to scan (comma-separated, default: from CI_IMAGE_TAG or latest tag)"
         required: false
-        default: "2025.10.03-f072ceb5"
+        default: ""
 
 permissions:
   contents: read
@@ -20,7 +20,7 @@ jobs:
     name: Full ecosystem scan (visibility only)
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/rulehub/ci-base:2025.10.03-f072ceb5
+      image: ghcr.io/rulehub/ci-base:latest
     strategy:
       fail-fast: false
       matrix:
@@ -37,11 +37,20 @@ jobs:
     steps:
       - uses: actions/checkout@ff7abcd0c3c05ccf6adc123a8cd1fd4fb30fb493
 
-      - name: Parse tags input
+      - name: Parse tags input or derive default
         id: tags
         shell: bash
+        env:
+          INPUT_TAGS: ${{ github.event.inputs.tags }}
         run: |
-          T="${{ github.event.inputs.tags || '2025.10.03-f072ceb5' }}"
+          # Prefer explicit input, then repo/org variable CI_IMAGE_TAG, else fall back to "latest"
+          T="${INPUT_TAGS:-}"
+          if [ -z "$T" ] && [ -n "${CI_IMAGE_TAG:-}" ]; then
+            T="$CI_IMAGE_TAG"
+          fi
+          if [ -z "$T" ]; then
+            T="latest"
+          fi
           # Under act we build local images as part of Stage 1 with tag 'latest'.
           # Override tags to 'latest' to scan local images via the docker daemon.
           if [ "${GITHUB_ACTOR:-}" = "nektos/act" ]; then

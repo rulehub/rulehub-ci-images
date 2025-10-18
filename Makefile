@@ -10,6 +10,13 @@ include .env
 export
 endif
 
+# Auto-load per-arch checksums if present (default ARCH=amd64; override via env)
+ARCH ?= amd64
+ifneq (,$(wildcard CHECKSUMS-$(ARCH).env))
+include CHECKSUMS-$(ARCH).env
+export
+endif
+
 # Config (env overrides respected)
 ORG ?= rulehub
 REG ?= ghcr.io/$(ORG)
@@ -18,6 +25,22 @@ BASE_REF ?= latest
 POLICY_REF ?= latest
 CHARTS_REF ?= latest
 FRONTEND_REF ?= latest
+
+# Optional tool checksum overrides (populate for supply-chain integrity)
+# When set, they will be passed as --build-arg to docker build so the Dockerfile
+# can verify downloaded artifacts. Leave blank to skip verification (current default).
+YQ_SHA256 ?=
+SYFT_TARBALL_SHA256 ?=
+GRYPE_TARBALL_SHA256 ?=
+COSIGN_SHA256 ?=
+ORAS_TARBALL_SHA256 ?=
+LYCHEE_TARBALL_SHA256 ?=
+
+# Policy overlay checksums (OPA/Kyverno); prefer arch-specific variables
+OPA_SHA256_AMD64 ?=
+KYVERNO_CLI_SHA256_AMD64 ?=
+# Enforce checksum verification in Dockerfiles when set to 1
+ENFORCE_CHECKSUMS ?= 0
 
 # Build contexts: default to this repository
 IMAGES_REPO ?= $(CURDIR)
@@ -80,10 +103,20 @@ docker-versions:
 build: base policy charts frontend
 
 # Convenience: build dev-local tags for act imageMap usage
-.PHONY: dev-local
+.PHONY: dev-local dev-local-charts dev-local-all
 dev-local: ## Build base+policy with BASE_REF=dev-local POLICY_REF=dev-local
 	@echo "=== Build dev-local (base+policy) ==="
-	@BASE_REF=dev-local POLICY_REF=dev-local $(MAKE) base policy
+	@ENFORCE_CHECKSUMS=1 BASE_REF=dev-local POLICY_REF=dev-local $(MAKE) base policy
+
+# Build ci-charts overlay too (uses BASE_REF=dev-local so jq/yq from base are present)
+dev-local-charts: ## Build base+charts with BASE_REF=dev-local CHARTS_REF=dev-local
+	@echo "=== Build dev-local-charts (base+charts) ==="
+	@BASE_REF=dev-local CHARTS_REF=dev-local $(MAKE) base charts
+
+# Convenience: build all overlays with dev-local tags for ACT imageMap usage
+dev-local-all: ## Build base+policy+charts+frontend with dev-local tags
+	@echo "=== Build dev-local-all (base+policy+charts+frontend) ==="
+	@ENFORCE_CHECKSUMS=1 BASE_REF=dev-local POLICY_REF=dev-local CHARTS_REF=dev-local FRONTEND_REF=dev-local $(MAKE) base policy charts frontend
 
 # Individual builds
 base: verify-repo
@@ -92,20 +125,30 @@ base: verify-repo
 	# Build base using the base/ directory as the build context so the
 	# Dockerfile can COPY scripts/ relative to the context (see comment in
 	# base/Dockerfile). This keeps overlay builds using the repo root context.
-	@docker build -f "$(IMAGES_REPO)/base/Dockerfile" -t "$(TAG_BASE)" "$(IMAGES_REPO)/base" 2>&1 | tee -a "$(LOG_DIR)/build-base.log"
+	@docker build $(if $(NO_CACHE),--no-cache,) \
+		--build-arg YQ_SHA256="$(YQ_SHA256)" \
+		--build-arg SYFT_TARBALL_SHA256="$(SYFT_TARBALL_SHA256)" \
+		--build-arg GRYPE_TARBALL_SHA256="$(GRYPE_TARBALL_SHA256)" \
+		--build-arg COSIGN_SHA256="$(COSIGN_SHA256)" \
+		--build-arg ORAS_TARBALL_SHA256="$(ORAS_TARBALL_SHA256)" \
+		--build-arg LYCHEE_TARBALL_SHA256="$(LYCHEE_TARBALL_SHA256)" \
+		-f "$(IMAGES_REPO)/base/Dockerfile" -t "$(TAG_BASE)" "$(IMAGES_REPO)/base" 2>&1 | tee -a "$(LOG_DIR)/build-base.log"
 
 policy: base verify-repo
 	@mkdir -p "$(LOG_DIR)"
 	@printf "\n=== Build policy ===\n" | tee "$(LOG_DIR)/build-policy.log"
-	@docker build \
+	@docker build $(if $(NO_CACHE),--no-cache,) \
 		--build-arg BASE_REF="$(TAG_BASE)" \
+        --build-arg ENFORCE_CHECKSUMS="$(ENFORCE_CHECKSUMS)" \
+        --build-arg OPA_SHA256_AMD64="$(OPA_SHA256_AMD64)" \
+        --build-arg KYVERNO_CLI_SHA256_AMD64="$(KYVERNO_CLI_SHA256_AMD64)" \
 		-f "$(IMAGES_REPO)/policy/Dockerfile" \
 		-t "$(TAG_POLICY)" "$(IMAGES_REPO)" 2>&1 | tee -a "$(LOG_DIR)/build-policy.log"
 
 charts: base verify-repo
 	@mkdir -p "$(LOG_DIR)"
 	@printf "\n=== Build charts ===\n" | tee "$(LOG_DIR)/build-charts.log"
-	@docker build \
+	@docker build $(if $(NO_CACHE),--no-cache,) \
 		--build-arg BASE_REF="$(TAG_BASE)" \
 		-f "$(IMAGES_REPO)/charts/Dockerfile" \
 		-t "$(TAG_CHARTS)" "$(IMAGES_REPO)" 2>&1 | tee -a "$(LOG_DIR)/build-charts.log"
@@ -113,7 +156,7 @@ charts: base verify-repo
 frontend: base verify-repo
 	@mkdir -p "$(LOG_DIR)"
 	@printf "\n=== Build frontend ===\n" | tee "$(LOG_DIR)/build-frontend.log"
-	@docker build \
+	@docker build $(if $(NO_CACHE),--no-cache,) \
 		--build-arg BASE_REF="$(TAG_BASE)" \
 		-f "$(IMAGES_REPO)/frontend/Dockerfile" \
 		-t "$(TAG_FRONTEND)" "$(IMAGES_REPO)" 2>&1 | tee -a "$(LOG_DIR)/build-frontend.log"
