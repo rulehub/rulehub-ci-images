@@ -20,12 +20,12 @@ jobs:
       SKIP_RULEHUB: "0"
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v5.0.0
 
       - name: Checkout sibling rulehub repo (for Docker build context)
         # Under ACT/GitHub, the workspace does not include the parent directory.
         # We fetch the rulehub repository into ./rulehub so Dockerfile.rulehub can COPY requirements.
-        uses: actions/checkout@v5
+        uses: actions/checkout@v5.0.0
         continue-on-error: true
         with:
           repository: ${{ github.repository_owner }}/rulehub
