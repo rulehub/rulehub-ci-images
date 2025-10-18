@@ -324,8 +324,10 @@ markupsafe==3.0.3 \
     #   mkdocs
 
 # Added explicitly to support yaml import in tools/generate_refs_index.py
+# Include hashes for common platforms (x86_64, aarch64) to satisfy --require-hashes across buildx matrix.
 pyyaml==6.0.2 \
-    --hash=sha256:80bab7bfc629882493af4aa31a4cfa43a4c57c83813253626916b8c7ada83476
+    --hash=sha256:80bab7bfc629882493af4aa31a4cfa43a4c57c83813253626916b8c7ada83476 \
+    --hash=sha256:1f71ea527786de97d1a0cc0eacd1defc0985dcf6b3f17bb77dcfc8c34bec4dc5
 mdurl==0.1.2 \
     --hash=sha256:84008a41e51615a49fc9966191ff91509e3c40b939176e643fd50a5c2196b8f8 \
     --hash=sha256:bb413d29f5eea38f31dd4754dd7377d4465116fb207585f97bf925588687c1ba
