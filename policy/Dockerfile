@@ -87,7 +87,7 @@ fi
 shift || true
 exec "$BIN" "$@"
 EOSH
-    
+
 # Make the selector executable in a separate layer
 RUN chmod +x /usr/local/bin/opa-select
 

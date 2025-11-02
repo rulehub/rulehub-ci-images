@@ -1,0 +1,35 @@
+# Pre-commit configuration for rulehub-ci-images
+# Minimal, fast hooks. Extend later if needed.
+
+minimum_pre_commit_version: '3.6.0'
+
+# Avoid scanning generated artifacts and local environments
+exclude: |
+  ^(
+    logs/|
+    base/\.venv-lock/|
+    base/\.lock-venv/|
+    \.venv/|
+    .*node_modules/|
+    .*\.log$
+  )
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+        args: [--allow-multiple-documents]
+      - id: check-merge-conflict
+      - id: check-added-large-files
+
+  - repo: https://github.com/adrienverge/yamllint
+    rev: v1.37.1
+    hooks:
+      - id: yamllint
+        # Make yamllint pragmatic: disable noisy line-length to reduce churn
+        args:
+          - -d
+          - '{extends: default, rules: {line-length: disable}}'

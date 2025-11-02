@@ -74,6 +74,26 @@ jobs:
             echo "$TAGS"
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
+      - name: Compute immutable ref
+        id: imm
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          set -euo pipefail
+          best=""
+          while IFS= read -r line; do
+            case "$line" in
+              *:v[0-9]*.[0-9]*.[0-9]*) best="$line"; break;;
+              *:[0-9][0-9][0-9][0-9].*) if [ -z "$best" ]; then best="$line"; fi;;
+            esac
+          done < <(printf "%s\n" "${TAGS}")
+          if [ -z "$best" ]; then
+            echo "No immutable tag found; fallback to first entry" >&2
+            best=$(printf "%s\n" "${TAGS}" | head -n1)
+          fi
+          tag_only="${best##*:}"
+          echo "ref=$best" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag_only" >> "$GITHUB_OUTPUT"
       - name: Login GHCR
         if: ${{ env.IS_ACT != 'true' }}
         uses: docker/login-action@v3
@@ -127,17 +147,17 @@ jobs:
       - name: Sanity check (base image)
         if: ${{ env.IS_ACT != 'true' }}
         run: |
-          docker run --rm ${{ env.REG }}/ci-base:latest yq --version
-          docker run --rm ${{ env.REG }}/ci-base:latest python3 --version
-          docker run --rm ${{ env.REG }}/ci-base:latest node --version
-          docker run --rm ${{ env.REG }}/ci-base:latest syft version
-          docker run --rm ${{ env.REG }}/ci-base:latest cosign version
+          docker run --rm "${{ steps.imm.outputs.ref }}" yq --version
+          docker run --rm "${{ steps.imm.outputs.ref }}" python3 --version
+          docker run --rm "${{ steps.imm.outputs.ref }}" node --version
+          docker run --rm "${{ steps.imm.outputs.ref }}" syft version
+          docker run --rm "${{ steps.imm.outputs.ref }}" cosign version
       - name: Generate SBOM (base)
         if: ${{ env.IS_ACT != 'true' }}
-        run: syft ${{ env.REG }}/ci-base:latest -o spdx-json > sbom-ci-base.spdx.json
+        run: syft "${{ steps.imm.outputs.ref }}" -o spdx-json > sbom-ci-base.spdx.json
       - name: Generate SBOM (base, OS-only)
         if: ${{ env.IS_ACT != 'true' }}
-        run: syft -c .github/syft-os.yaml ${{ env.REG }}/ci-base:latest -o syft-json > sbom-ci-base-os.syft.json
+        run: syft -c .github/syft-os.yaml "${{ steps.imm.outputs.ref }}" -o syft-json > sbom-ci-base-os.syft.json
       - name: Post-filter SBOM to OS-only (base)
         if: ${{ env.IS_ACT != 'true' }}
         run: jq '.artifacts |= map(select(.type=="apk" or .type=="deb" or .type=="rpm"))' sbom-ci-base-os.syft.json > sbom-ci-base-os.syft.os-only.json
@@ -196,6 +216,25 @@ jobs:
             echo "$TAGS"
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
+      - name: Compute immutable ref
+        id: imm
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          set -euo pipefail
+          best=""
+          while IFS= read -r line; do
+            case "$line" in
+              *:v[0-9]*.[0-9]*.[0-9]*) best="$line"; break;;
+              *:[0-9][0-9][0-9][0-9].*) if [ -z "$best" ]; then best="$line"; fi;;
+            esac
+          done < <(printf "%s\n" "${TAGS}")
+          if [ -z "$best" ]; then
+            best=$(printf "%s\n" "${TAGS}" | head -n1)
+          fi
+          tag_only="${best##*:}"
+          echo "ref=$best" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag_only" >> "$GITHUB_OUTPUT"
       - name: Patch Dockerfile placeholders (policy)
         run: |
           sed -i 's|ghcr.io/<ORG>|ghcr.io/${{ github.repository_owner }}|g' policy/Dockerfile || true
@@ -248,14 +287,14 @@ jobs:
       - name: Sanity check (policy image)
         if: ${{ env.IS_ACT != 'true' }}
         run: |
-          docker run --rm ${{ env.REG }}/ci-policy:latest opa version
-          docker run --rm ${{ env.REG }}/ci-policy:latest kyverno version
+          docker run --rm "${{ steps.imm.outputs.ref }}" opa version
+          docker run --rm "${{ steps.imm.outputs.ref }}" kyverno version
       - name: Generate SBOM (policy)
         if: ${{ env.IS_ACT != 'true' }}
-        run: syft ${{ env.REG }}/ci-policy:latest -o spdx-json > sbom-ci-policy.spdx.json
+        run: syft "${{ steps.imm.outputs.ref }}" -o spdx-json > sbom-ci-policy.spdx.json
       - name: Generate SBOM (policy, OS-only)
         if: ${{ env.IS_ACT != 'true' }}
-        run: syft -c .github/syft-os.yaml ${{ env.REG }}/ci-policy:latest -o syft-json > sbom-ci-policy-os.syft.json
+        run: syft -c .github/syft-os.yaml "${{ steps.imm.outputs.ref }}" -o syft-json > sbom-ci-policy-os.syft.json
       - name: Post-filter SBOM to OS-only (policy)
         if: ${{ env.IS_ACT != 'true' }}
         run: jq '.artifacts |= map(select(.type=="apk" or .type=="deb" or .type=="rpm"))' sbom-ci-policy-os.syft.json > sbom-ci-policy-os.syft.os-only.json
@@ -313,6 +352,25 @@ jobs:
             echo "$TAGS"
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
+      - name: Compute immutable ref
+        id: imm
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          set -euo pipefail
+          best=""
+          while IFS= read -r line; do
+            case "$line" in
+              *:v[0-9]*.[0-9]*.[0-9]*) best="$line"; break;;
+              *:[0-9][0-9][0-9][0-9].*) if [ -z "$best" ]; then best="$line"; fi;;
+            esac
+          done < <(printf "%s\n" "${TAGS}")
+          if [ -z "$best" ]; then
+            best=$(printf "%s\n" "${TAGS}" | head -n1)
+          fi
+          tag_only="${best##*:}"
+          echo "ref=$best" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag_only" >> "$GITHUB_OUTPUT"
       - name: Patch Dockerfile placeholders (charts)
         run: |
           sed -i 's|ghcr.io/<ORG>|ghcr.io/${{ github.repository_owner }}|g' charts/Dockerfile || true
@@ -333,8 +391,12 @@ jobs:
           FIRST_TAG=$(echo "$TAGS" | head -n1)
           mkdir -p ./artifacts
           # Use local base image under act to avoid GHCR pulls.
-          DOCKER_BUILDKIT=1 docker build --pull=false -t "$FIRST_TAG" \
+          # Use host networking to avoid local bridge DNS/TLS oddities under act
+          DOCKER_BUILDKIT=1 docker build --pull=false --network=host -t "$FIRST_TAG" \
             --build-arg BASE_REF=ci-base:localtest \
+            ${HELM_BASE_URL:+--build-arg HELM_BASE_URL=${HELM_BASE_URL}} \
+            ${HELM_GITHUB_BASE_URL:+--build-arg HELM_GITHUB_BASE_URL=${HELM_GITHUB_BASE_URL}} \
+            ${HELM_TARBALL_SHA256:+--build-arg HELM_TARBALL_SHA256=${HELM_TARBALL_SHA256}} \
             ./charts 2>&1 | tee ./artifacts/build-charts-output.log
       - name: Build & push charts (CI)
         if: env.IS_ACT != 'true'
@@ -362,16 +424,16 @@ jobs:
       - name: Sanity check (charts image)
         if: ${{ env.IS_ACT != 'true' }}
         run: |
-          docker run --rm ${{ env.REG }}/ci-charts:latest helm version --short
-          docker run --rm ${{ env.REG }}/ci-charts:latest kubeconform -v
-          docker run --rm ${{ env.REG }}/ci-charts:latest sh -lc 'HELM_PLUGINS=/usr/local/helm-plugins helm unittest --help >/dev/null 2>&1 && echo ok || (echo fail; exit 1)'
-          docker run --rm ${{ env.REG }}/ci-charts:latest ct version || docker run --rm ${{ env.REG }}/ci-charts:latest ct --help
+          docker run --rm "${{ steps.imm.outputs.ref }}" helm version --short
+          docker run --rm "${{ steps.imm.outputs.ref }}" kubeconform -v
+          docker run --rm "${{ steps.imm.outputs.ref }}" sh -lc 'HELM_PLUGINS=/usr/local/helm-plugins helm unittest --help >/dev/null 2>&1 && echo ok || (echo fail; exit 1)'
+          docker run --rm "${{ steps.imm.outputs.ref }}" ct version || docker run --rm "${{ steps.imm.outputs.ref }}" ct --help
       - name: Generate SBOM (charts)
         if: ${{ env.IS_ACT != 'true' }}
-        run: syft ${{ env.REG }}/ci-charts:latest -o spdx-json > sbom-ci-charts.spdx.json
+        run: syft "${{ steps.imm.outputs.ref }}" -o spdx-json > sbom-ci-charts.spdx.json
       - name: Generate SBOM (charts, OS-only)
         if: ${{ env.IS_ACT != 'true' }}
-        run: syft -c .github/syft-os.yaml ${{ env.REG }}/ci-charts:latest -o syft-json > sbom-ci-charts-os.syft.json
+        run: syft -c .github/syft-os.yaml "${{ steps.imm.outputs.ref }}" -o syft-json > sbom-ci-charts-os.syft.json
       - name: Post-filter SBOM to OS-only (charts)
         if: ${{ env.IS_ACT != 'true' }}
         run: jq '.artifacts |= map(select(.type=="apk" or .type=="deb" or .type=="rpm"))' sbom-ci-charts-os.syft.json > sbom-ci-charts-os.syft.os-only.json
@@ -467,6 +529,25 @@ jobs:
             echo "$TAGS"
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
+      - name: Compute immutable ref
+        id: imm
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          set -euo pipefail
+          best=""
+          while IFS= read -r line; do
+            case "$line" in
+              *:v[0-9]*.[0-9]*.[0-9]*) best="$line"; break;;
+              *:[0-9][0-9][0-9][0-9].*) if [ -z "$best" ]; then best="$line"; fi;;
+            esac
+          done < <(printf "%s\n" "${TAGS}")
+          if [ -z "$best" ]; then
+            best=$(printf "%s\n" "${TAGS}" | head -n1)
+          fi
+          tag_only="${best##*:}"
+          echo "ref=$best" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag_only" >> "$GITHUB_OUTPUT"
       - name: Patch Dockerfile placeholders (frontend)
         run: |
           sed -i 's|ghcr.io/<ORG>|ghcr.io/${{ github.repository_owner }}|g' frontend/Dockerfile || true
@@ -516,15 +597,15 @@ jobs:
       - name: Sanity check (frontend image)
         if: ${{ env.IS_ACT != 'true' }}
         run: |
-          docker run --rm ${{ env.REG }}/ci-frontend:latest node --version
-          docker run --rm ${{ env.REG }}/ci-frontend:latest npm --version
-          docker run --rm ${{ env.REG }}/ci-frontend:latest corepack --version || true
+          docker run --rm "${{ steps.imm.outputs.ref }}" node --version
+          docker run --rm "${{ steps.imm.outputs.ref }}" npm --version
+          docker run --rm "${{ steps.imm.outputs.ref }}" corepack --version || true
       - name: Generate SBOM (frontend)
         if: ${{ env.IS_ACT != 'true' }}
-        run: syft ${{ env.REG }}/ci-frontend:latest -o spdx-json > sbom-ci-frontend.spdx.json
+        run: syft "${{ steps.imm.outputs.ref }}" -o spdx-json > sbom-ci-frontend.spdx.json
       - name: Generate SBOM (frontend, OS-only)
         if: ${{ env.IS_ACT != 'true' }}
-        run: syft -c .github/syft-os.yaml ${{ env.REG }}/ci-frontend:latest -o syft-json > sbom-ci-frontend-os.syft.json
+        run: syft -c .github/syft-os.yaml "${{ steps.imm.outputs.ref }}" -o syft-json > sbom-ci-frontend-os.syft.json
       - name: Post-filter SBOM to OS-only (frontend)
         if: ${{ env.IS_ACT != 'true' }}
         run: jq '.artifacts |= map(select(.type=="apk" or .type=="deb" or .type=="rpm"))' sbom-ci-frontend-os.syft.json > sbom-ci-frontend-os.syft.os-only.json

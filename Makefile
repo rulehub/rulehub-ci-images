@@ -10,8 +10,20 @@ include .env
 export
 endif
 
-# Auto-load per-arch checksums if present (default ARCH=amd64; override via env)
-ARCH ?= amd64
+# Auto-load per-arch checksums if present.
+# ARCH may be provided via env; if not, derive from host uname -m and normalize to Docker arch labels.
+ifeq ($(strip $(ARCH)),)
+ARCH_RAW := $(shell uname -m)
+	ifeq ($(ARCH_RAW),x86_64)
+		ARCH := amd64
+	else ifeq ($(ARCH_RAW),arm64)
+		ARCH := arm64
+	else ifeq ($(ARCH_RAW),aarch64)
+		ARCH := arm64
+	else
+		ARCH := amd64
+	endif
+endif
 ifneq (,$(wildcard CHECKSUMS-$(ARCH).env))
 include CHECKSUMS-$(ARCH).env
 export
@@ -53,6 +65,10 @@ TAG_CHARTS := $(REG)/ci-charts:$(CHARTS_REF)
 TAG_FRONTEND := $(REG)/ci-frontend:$(FRONTEND_REF)
 
 LOG_DIR := logs
+
+# Allow callers to override BuildKit usage (useful for local/act where overlayfs hardlink limits
+# can trigger EMLINK during checksum calculations). Default to enabled.
+DOCKER_BUILDKIT ?= 1
 
 .PHONY: help print-config verify-repo docker-versions \
 	build base policy charts frontend \
@@ -189,15 +205,17 @@ base-rulehub: verify-repo
 	# the Dockerfile can COPY rulehub/requirements*. We assume IMAGES_REPO is the
 	# repo root containing the base/ and the sibling rulehub/ directory.
 	# Prefer a local ./rulehub checkout if present (as ensured by CI workflow),
-	# otherwise fall back to using the parent directory as context.
-	@if [ -d "$(IMAGES_REPO)/rulehub" ]; then \
-		echo "[base-rulehub] Using current repo as build context (./rulehub present)" | tee -a "$(LOG_DIR)/build-base-rulehub.log"; \
-		DOCKER_BUILDKIT=1 docker build --build-arg BASE_REF="$(TAG_BASE)" \
+	# but avoid using it when it's a symlink to a path outside the build context
+	# (Docker forbids COPY from symlinks resolving outside context). In that case,
+	# fall back to using the parent directory as context so rulehub/ is in-context.
+	@if [ -d "$(IMAGES_REPO)/rulehub" ] && [ ! -L "$(IMAGES_REPO)/rulehub" ]; then \
+		echo "[base-rulehub] Using current repo as build context (./rulehub present, not a symlink)" | tee -a "$(LOG_DIR)/build-base-rulehub.log"; \
+		DOCKER_BUILDKIT=$(DOCKER_BUILDKIT) docker build $(if $(NO_CACHE),--no-cache,) --build-arg BASE_REF="$(TAG_BASE)" \
 			--build-arg IMAGES_PREFIX="" \
 			-f "$(IMAGES_REPO)/base/Dockerfile.rulehub" -t "$(TAG_BASE_RULEHUB)" "$(IMAGES_REPO)" 2>&1 | tee -a "$(LOG_DIR)/build-base-rulehub.log"; \
 	else \
-		echo "[base-rulehub] Using parent directory as build context" | tee -a "$(LOG_DIR)/build-base-rulehub.log"; \
-		DOCKER_BUILDKIT=1 docker build --build-arg BASE_REF="$(TAG_BASE)" \
+		echo "[base-rulehub] Using parent directory as build context (./rulehub missing or symlink)" | tee -a "$(LOG_DIR)/build-base-rulehub.log"; \
+		DOCKER_BUILDKIT=$(DOCKER_BUILDKIT) docker build $(if $(NO_CACHE),--no-cache,) --build-arg BASE_REF="$(TAG_BASE)" \
 			--build-arg IMAGES_PREFIX="rulehub-ci-images/" \
 			-f "$(IMAGES_REPO)/base/Dockerfile.rulehub" -t "$(TAG_BASE_RULEHUB)" "$(IMAGES_REPO)/.." 2>&1 | tee -a "$(LOG_DIR)/build-base-rulehub.log"; \
 	fi

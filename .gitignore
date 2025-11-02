@@ -5,3 +5,7 @@ act_report/
 .env
 .venv-lock
 .venv/
+base/.lock-venv
+.github/act.events
+charts/cache/*.tar.gz
+

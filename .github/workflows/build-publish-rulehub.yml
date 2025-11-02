@@ -78,6 +78,14 @@ jobs:
             echo "IS_ACT=true" >> "$GITHUB_ENV"
           fi
 
+      - name: Disable BuildKit under ACT (workaround for local overlayfs link limits)
+        if: ${{ env.IS_ACT == 'true' }}
+        shell: bash
+        run: |
+          # Legacy docker builder avoids BuildKit hardlink-based snapshotting that
+          # can trigger "failed to calculate checksum ... too many links" on some hosts.
+          echo "DOCKER_BUILDKIT=0" >> "$GITHUB_ENV"
+
       - name: Set up Docker Buildx
         if: ${{ env.IS_ACT != 'true' }}
         uses: docker/setup-buildx-action@v3
@@ -109,6 +117,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # Under ACT, force --no-cache to ensure script changes (install-reqs.sh) are picked up
+          if [ "${IS_ACT:-}" = "true" ]; then export NO_CACHE=1; fi
           echo "=== make base-rulehub ==="
           if ! make base-rulehub; then
             echo "--- logs/build-base-rulehub.log (tail -200) ---"; tail -n 200 logs/build-base-rulehub.log 2>/dev/null || true

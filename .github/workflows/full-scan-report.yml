@@ -7,6 +7,9 @@ on:
         description: "Image tags to scan (comma-separated, default: from CI_IMAGE_TAG or latest tag)"
         required: false
         default: ""
+  # Temporary: also trigger on push to main to avoid 'skipped'; job will noop on push
+  push:
+    branches: [main]
 
 permissions:
   contents: read
@@ -16,11 +19,27 @@ env:
   REG: ghcr.io/rulehub
 
 jobs:
+  resolve-ci-image:
+    name: Resolve CI image
+    uses: rulehub/rulehub/.github/workflows/resolve-ci-image.yml@main
+    with:
+      kind: base
+
+  noop-on-push:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: No-op summary
+        run: |
+          echo "full-scan-report: noop on push (manual-only workflow)" >> "$GITHUB_STEP_SUMMARY"
+
   scan:
+    needs: [resolve-ci-image]
+    if: github.event_name == 'workflow_dispatch'
     name: Full ecosystem scan (visibility only)
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/rulehub/ci-base:latest
+      image: "${{ needs.resolve-ci-image.outputs.image }}"
     strategy:
       fail-fast: false
       matrix:
@@ -54,7 +73,8 @@ jobs:
           # Under act we build local images as part of Stage 1 with tag 'latest'.
           # Override tags to 'latest' to scan local images via the docker daemon.
           if [ "${GITHUB_ACTOR:-}" = "nektos/act" ]; then
-            T="latest"
+            # Prefer CI_IMAGE_TAG if set for local builds; otherwise fallback to 'latest'
+            T="${CI_IMAGE_TAG:-latest}"
           fi
           echo "tags=$T" >> "$GITHUB_OUTPUT"
 
