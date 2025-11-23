@@ -168,7 +168,7 @@ jobs:
         run: grype -c .github/grype-os.yaml sbom:sbom-ci-base-os.syft.os-only.json --fail-on critical --only-fixed --add-cpes-if-none
       - name: Upload SBOM artifact (base)
         if: ${{ always() && env.IS_ACT != 'true' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: sbom-ci-base
           path: sbom-ci-base.spdx.json
@@ -305,7 +305,7 @@ jobs:
         run: grype -c .github/grype-os.yaml sbom:sbom-ci-policy-os.syft.os-only.json --fail-on critical --only-fixed --add-cpes-if-none
       - name: Upload SBOM artifact (policy)
         if: ${{ always() && env.IS_ACT != 'true' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: sbom-ci-policy
           path: sbom-ci-policy.spdx.json
@@ -444,7 +444,7 @@ jobs:
         run: grype -c .github/grype-os.yaml sbom:sbom-ci-charts-os.syft.os-only.json --fail-on critical --only-fixed --add-cpes-if-none
       - name: Upload SBOM artifact (charts)
         if: ${{ always() && env.IS_ACT != 'true' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: sbom-ci-charts
           path: sbom-ci-charts.spdx.json
@@ -616,7 +616,7 @@ jobs:
         run: grype -c .github/grype-os.yaml sbom:sbom-ci-frontend-os.syft.os-only.json --fail-on critical --only-fixed --add-cpes-if-none
       - name: Upload SBOM artifact (frontend)
         if: ${{ always() && env.IS_ACT != 'true' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: sbom-ci-frontend
           path: sbom-ci-frontend.spdx.json

@@ -139,7 +139,7 @@ jobs:
 
       - name: Upload build logs (always, CI only)
         if: ${{ always() && env.IS_ACT != 'true' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: build-logs-base-rulehub
           path: |
@@ -203,7 +203,7 @@ jobs:
 
       - name: Upload SBOM artifact (ci-base-rulehub)
         if: ${{ always() && env.IS_ACT != 'true' && env.SKIP_RULEHUB != '1' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: sbom-ci-base-rulehub
           path: |
