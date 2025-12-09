@@ -35,7 +35,7 @@ jobs:
   build-base:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@ff7abcd0c3c05ccf6adc123a8cd1fd4fb30fb493
+      - uses: actions/checkout@c2d88d3ecc89a9ef08eebf45d9637801dcee7eb5
       - name: Detect act
         run: |
           if [ "${ACT:-}" = "true" ] || [ "${IS_ACT:-}" = "true" ]; then
@@ -180,7 +180,7 @@ jobs:
     needs: build-base
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@ff7abcd0c3c05ccf6adc123a8cd1fd4fb30fb493
+      - uses: actions/checkout@c2d88d3ecc89a9ef08eebf45d9637801dcee7eb5
       - name: Detect act
         run: |
           if [ "${ACT:-}" = "true" ] || [ "${IS_ACT:-}" = "true" ]; then
@@ -317,7 +317,7 @@ jobs:
     needs: build-base
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@ff7abcd0c3c05ccf6adc123a8cd1fd4fb30fb493
+      - uses: actions/checkout@c2d88d3ecc89a9ef08eebf45d9637801dcee7eb5
       - name: Detect act
         run: |
           if [ "${ACT:-}" = "true" ] || [ "${IS_ACT:-}" = "true" ]; then
@@ -494,7 +494,7 @@ jobs:
     needs: build-base
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@ff7abcd0c3c05ccf6adc123a8cd1fd4fb30fb493
+      - uses: actions/checkout@c2d88d3ecc89a9ef08eebf45d9637801dcee7eb5
       - name: Detect act
         run: |
           if [ "${ACT:-}" = "true" ] || [ "${IS_ACT:-}" = "true" ]; then
